@@ -1,0 +1,8 @@
+data/*
+!data/.htaccess
+*.db-wal
+*.db-shm
+*.log
+.DS_Store
+.idea/
+.vscode/
