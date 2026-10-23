@@ -28,7 +28,7 @@ final class FreeAI
     public static function valid(string $route): bool
     {
         [$prov] = explode(':', $route, 2);
-        return isset(self::PROVIDERS[$prov]) && self::keys($prov) !== [];
+        return isset(self::PROVIDERS[$prov]);
     }
 
     public static function models(string $prov): array
