@@ -18,13 +18,7 @@ return [
     ],
 
     'ai' => [
-        'keys'        => array_merge(envList('GEMINI_KEYS'), [
-            'AQ.Ab8RN6KosPnvbPgW6XBQeFsKZGEazG336ToEx5CJSIFQvSUOmw',
-            'AQ.Ab8RN6JvSsa-0HpjKeJwWAOIjWDkQ1auilmvKW_yyqfiNrVIzw',
-            'AQ.Ab8RN6LRgiYNf70WGB5bvDaERdUqpOmCU7T50Ul311cQ24Yoeg',
-            'AQ.Ab8RN6LIKgVJIa_se8u51DwT3QSxWRRqAF1jXbTkzZap_zf8Iw',
-            'AQ.Ab8RN6Jt2WBQ8J2CZX2IFLQy2qWrgk3kgEZ9zeBJo9jwmxcDng',
-        ]),
+        'keys'        => envList('GEMINI_KEYS'),
         'models'      => envList('GEMINI_MODELS', [
             'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest',
             'gemma-4-31b-it',
@@ -42,14 +36,7 @@ return [
             'groq' => envList('GROQ_MODELS'),
         ],
         'free_keys'   => [
-            'groq'       => array_merge(envList('GROQ_KEYS'), [
-                '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',
-                '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',
-                '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',
-                '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',
-                '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',
-                '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',
-            ]),
+            'groq'       => envList('GROQ_KEYS'),
         ],
     ],
     'storage_chat' => env('STORAGE_CHAT_ID', ''),
