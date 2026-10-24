@@ -35,10 +35,6 @@ final class GuestHandler
             return;
         }
 
-        if ((isset($msg['voice']) || isset($msg['audio'])) && !AI::voiceSupported()) {
-            return;
-        }
-
         $imid = self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
 
         $parts = [];
@@ -101,13 +97,8 @@ final class GuestHandler
     public static function image(?string $imid, ?string $qid, string $prompt): void
     {
         self::edit($imid, null, '🎨 دارم می‌کشمش، چند لحظه صبر کن...');
-        $fid = null;
-        if (FreeAI::imageEnabled(explode(':', AI::route(), 2)[0])) {
-            $bytes = ImageGen::generate($prompt, static function () {});
-            $fid   = $bytes !== null ? ImageGen::fileId($bytes) : null;
-        }
-        $url = $fid === null ? ImageGen::warmUrl($prompt, static function () {}) : null;
-        if ($fid === null && $url === null) {
+        $url = ImageGen::warmUrl($prompt, static function () {});
+        if ($url === null) {
             self::edit($imid, $qid, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
             return;
         }
@@ -117,13 +108,14 @@ final class GuestHandler
         $tg = App::tg();
         $r  = $tg->call('editMessageMedia', [
             'inline_message_id' => $imid,
-            'media'             => ['type' => 'photo', 'media' => $fid ?? $url, 'caption' => '🎨 بفرما، اینم عکست!', 'parse_mode' => 'HTML'],
+            'media'             => ['type' => 'photo', 'media' => $url, 'caption' => '🎨 بفرما، اینم عکست!', 'parse_mode' => 'HTML'],
         ], 60);
         if (empty($r['ok'])) {
             $tg->call('editMessageText', [
                 'inline_message_id'    => $imid,
                 'text'                 => '🎨 بفرما، اینم عکست!',
-            ] + ($url !== null ? ['link_preview_options' => ['url' => $url, 'prefer_large_media' => true, 'show_above_text' => true]] : []), 30);
+                'link_preview_options' => ['url' => $url, 'prefer_large_media' => true, 'show_above_text' => true],
+            ], 30);
         }
     }
 

@@ -519,16 +519,7 @@ final class AI
 
     public static function isGroqRoute(): bool
     {
-        return explode(':', self::route(), 2)[0] !== 'gemini';
-    }
-
-    public static function voiceSupported(): bool
-    {
-        $route = self::route();
-        if ($route === 'gemini' || str_starts_with($route, 'gemini:')) {
-            return true;
-        }
-        return FreeAI::canTranscribe(explode(':', $route, 2)[0]);
+        return str_starts_with(self::route(), 'groq');
     }
 
     public static function splitReaction(string $text, bool $bare): array
