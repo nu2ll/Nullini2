@@ -289,6 +289,21 @@ check('intent translate', Intent::parse("ACTION: translate | English | سلام\
 check('intent parse bad', Intent::parse('ACTION: hack'), null);
 check('intent parse none', Intent::parse('سلام'), null);
 
+$buf = '';
+check('sse partial', Http::sseData($buf, "data: {\"a\":1}\r\ndata: {\"b\""), ['{"a":1}']);
+check('sse rest', Http::sseData($buf, ":2}\n\ndata: [DONE]\n"), ['{"b":2}', '[DONE]']);
+
+$live = new LiveReply(['chat' => ['id' => 1, 'type' => 'private'], 'message_id' => 1]);
+$body = new ReflectionMethod($live, 'body');
+check('live hold reaction', $body->invoke($live, 'REACTION: 🔥', false), null);
+check('live strip reaction', $body->invoke($live, "REACTION: 🔥\n\nسلام، خوبی؟", false), 'سلام، خوبی؟');
+check('live persian first', $body->invoke($live, 'سلام', false), 'سلام');
+check('live image hidden', $body->invoke($live, "REACTION: 🎨\nIMAGE: a cat in space", false), false);
+check('live action hidden', $body->invoke($live, "REACTION: 👍\nACTION: weather | Tehran", false), false);
+check('live hold english', $body->invoke($live, "REACTION: 👍\nACT", false), null);
+check('live english ok', $body->invoke($live, "REACTION: 👍\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
+check('live think hidden', $body->invoke($live, "<think>hmm", false), null);
+
 @unlink($db);
 @unlink($db . '-wal');
 @unlink($db . '-shm');

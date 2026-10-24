@@ -16,6 +16,8 @@ final class AI
 
     private const API = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
 
+    private const STREAM_API = 'https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse';
+
     private const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'];
 
     public static function keys(): array
@@ -219,7 +221,9 @@ final class AI
                 if ($thinking && !$gemma) {
                     $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking];
                 }
-                $r = Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, 10)));
+                $r = is_callable($opt['stream'] ?? null)
+                    ? self::geminiStream($model, $payload, $key, (int) max(5, min($left, 55)), $opt['stream'])
+                    : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, 10)));
 
                 if ($r['code'] === 200 && $r['data'] !== null) {
                     $text = self::extractText($r['data']);
@@ -265,6 +269,48 @@ final class AI
             }
         }
         return null;
+    }
+
+    private static function geminiStream(string $model, array $payload, string $key, int $timeout, callable $emit): array
+    {
+        $text   = '';
+        $buf    = '';
+        $finish = null;
+
+        $r = Http::stream(sprintf(self::STREAM_API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], $timeout,
+            static function (string $chunk) use (&$text, &$buf, &$finish, $emit): void {
+                foreach (Http::sseData($buf, $chunk) as $json) {
+                    $d = json_decode($json, true);
+                    if (!is_array($d)) {
+                        continue;
+                    }
+                    $finish = $d['candidates'][0]['finishReason'] ?? $d['promptFeedback']['blockReason'] ?? $finish;
+                    $delta  = '';
+                    foreach ($d['candidates'][0]['content']['parts'] ?? [] as $p) {
+                        if (empty($p['thought']) && isset($p['text'])) {
+                            $delta .= $p['text'];
+                        }
+                    }
+                    if ($delta !== '') {
+                        $text .= $delta;
+                        $emit($text);
+                    }
+                }
+            });
+
+        if ($r['code'] === 200) {
+            if ($text === '' && $r['error'] !== '') {
+                return ['code' => 0, 'data' => null, 'raw' => $r['error']];
+            }
+            $cand = $text !== '' ? ['content' => ['parts' => [['text' => $text]]]] : ['finishReason' => $finish];
+            return ['code' => 200, 'data' => ['candidates' => [$cand]], 'raw' => ''];
+        }
+
+        $data = $r['raw'] !== '' ? json_decode($r['raw'], true) : null;
+        if (is_array($data) && isset($data[0]['error'])) {
+            $data = $data[0];
+        }
+        return ['code' => $r['code'], 'data' => is_array($data) ? $data : null, 'raw' => $r['raw'] !== '' ? $r['raw'] : $r['error']];
     }
 
     private static function extractText(array $data): ?string
@@ -400,10 +446,11 @@ final class AI
             'max_tokens'  => $opt['max_tokens'] ?? 2000,
             'deadline'    => $deadline,
             'section'     => 'chat',
+            'stream'      => $opt['on_text'] ?? null,
         ]);
         if ($text === null && ($opt['tier'] ?? 'smart') === 'smart' && self::hasTiers() && $deadline - microtime(true) > 5) {
             logWarn('ai', 'smart chain failed, retrying on lite');
-            $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'max_tokens' => $opt['max_tokens'] ?? 2000, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat']);
+            $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'max_tokens' => $opt['max_tokens'] ?? 2000, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
         }
 
         $out = ['answer' => null, 'reaction' => null, 'image' => null, 'action' => null];

@@ -42,6 +42,7 @@ return [
     'storage_chat' => env('STORAGE_CHAT_ID', ''),
     'ai_memory_messages' => (int) env('AI_MEMORY_MESSAGES', 20),
     'ai_typing_effect'   => true,
+    'ai_stream'          => env('AI_STREAM', '1') !== '0',
 
     'image_model'          => env('IMAGE_MODEL', 'flux'),
     'image_size'           => 1024,

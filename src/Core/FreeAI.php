@@ -298,7 +298,9 @@ final class FreeAI
                 return ['text' => null, 'kind' => 'timeout', 'seen' => $seen];
             }
             $idx = ($start + $i) % $n;
-            $r   = Http::postJson($url, $payload, ['Authorization: Bearer ' . $keys[$idx]], (int) max(5, min($left, $cap)));
+            $r   = is_callable($opt['stream'] ?? null)
+                ? self::streamOnce($url, $payload, $keys[$idx], (int) max(5, min($left, 55)), $opt['stream'])
+                : Http::postJson($url, $payload, ['Authorization: Bearer ' . $keys[$idx]], (int) max(5, min($left, $cap)));
 
             if ($r['code'] === 200 && $r['data'] !== null) {
                 $text = self::extract($r['data']);
@@ -323,6 +325,38 @@ final class FreeAI
             }
         }
         return ['text' => null, 'kind' => 'failed', 'seen' => $seen];
+    }
+
+    private static function streamOnce(string $url, array $payload, string $key, int $timeout, callable $emit): array
+    {
+        $payload['stream'] = true;
+        $text = '';
+        $buf  = '';
+
+        $r = Http::stream($url, $payload, ['Authorization: Bearer ' . $key], $timeout,
+            static function (string $chunk) use (&$text, &$buf, $emit): void {
+                foreach (Http::sseData($buf, $chunk) as $json) {
+                    if ($json === '[DONE]') {
+                        continue;
+                    }
+                    $d     = json_decode($json, true);
+                    $delta = is_array($d) ? ($d['choices'][0]['delta']['content'] ?? null) : null;
+                    if (is_string($delta) && $delta !== '') {
+                        $text .= $delta;
+                        $emit($text);
+                    }
+                }
+            });
+
+        if ($r['code'] === 200) {
+            if (trim($text) === '' && $r['error'] !== '') {
+                return ['code' => 0, 'data' => null, 'raw' => $r['error']];
+            }
+            return ['code' => 200, 'data' => ['choices' => [['message' => ['content' => $text]]]], 'raw' => ''];
+        }
+
+        $data = $r['raw'] !== '' ? json_decode($r['raw'], true) : null;
+        return ['code' => $r['code'], 'data' => is_array($data) ? $data : null, 'raw' => $r['raw'] !== '' ? $r['raw'] : $r['error']];
     }
 
     private static function convert(array $messages, bool $vision): ?array

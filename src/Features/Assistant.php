@@ -150,13 +150,16 @@ final class Assistant
         }
 
         $history = $service ? [] : self::history($chatId, $userId);
-        $res     = AI::reply($content, $ctx, $history);
+        $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
+        $opt     = $live ? ['on_text' => $live->feed(...)] : [];
+        $res     = AI::reply($content, $ctx, $history, $opt);
 
         if ($res['reaction'] !== null) {
             $tg->react($chatId, (int) $msg['message_id'], $res['reaction']);
         }
 
         if (!empty($res['action'])) {
+            $live?->discard();
             [$act, $arg] = $res['action'];
             if (Intent::run($msg, $act, $arg)) {
                 if (!$service) {
@@ -164,10 +167,11 @@ final class Assistant
                 }
                 return;
             }
-            $res = AI::reply($content, ['no_action' => true] + $ctx, $history);
+            $res = AI::reply($content, ['no_action' => true] + $ctx, $history, $opt);
         }
 
         if (!empty($res['image'])) {
+            $live?->discard();
             Users::hit('image');
             if (ImageGen::draw($msg, $res['image']) && !$service) {
                 self::remember($chatId, $userId, $log, '[یه عکس براش ساختم: ' . mb_substr($res['image'], 0, 200) . ']');
@@ -176,8 +180,10 @@ final class Assistant
         }
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
 
-        self::typing($chatId, $answer);
-        self::send($msg, $answer);
+        if (!$live || !$live->finish($answer)) {
+            self::typing($chatId, $answer);
+            self::send($msg, $answer);
+        }
 
         if ($res['answer'] !== null && !$service) {
             self::remember($chatId, $userId, $log, $res['answer']);
