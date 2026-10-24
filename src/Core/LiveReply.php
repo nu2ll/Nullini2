@@ -8,14 +8,11 @@ final class LiveReply
 {
     private ?int $mid     = null;
     private string $mode  = 'wait';   // wait | live | silent
-    private float $last   = 0.0;
     private int $lastLen  = 0;
     private int $failures = 0;
-    private float $every;
 
-    public function __construct(private array $msg)
+    public function __construct(private array $msg, private ?string $imid = null, private string $head = '', private bool $reaction = true)
     {
-        $this->every = 2.0;
     }
 
     public function feed(string $raw): void
@@ -56,7 +53,6 @@ final class LiveReply
         }
         $this->mid      = null;
         $this->mode     = 'wait';
-        $this->last     = 0.0;
         $this->lastLen  = 0;
         $this->failures = 0;
     }
@@ -71,16 +67,18 @@ final class LiveReply
         }
 
         $nl = strpos($t, "\n");
-        if ($nl === false) {
-            if (!$final && mb_strlen($t) < 48 && !preg_match('/^\p{Arabic}/u', $t)) {
-                return null;
-            }
-        } elseif (AI::isGroqRoute()) {
-            $t = AI::splitReaction($t, true)[1];
-        } else {
-            $parts = preg_split('/\r?\n/', $t, 2) ?: [$t];
-            if (preg_match('/^\s*reaction\s*:?\s*(.*)$/iu', $parts[0])) {
-                $t = ltrim($parts[1] ?? '');
+        if ($this->reaction) {
+            if ($nl === false) {
+                if (!$final && mb_strlen($t) < 48 && !preg_match('/^\p{Arabic}/u', $t)) {
+                    return null;
+                }
+            } elseif (AI::isGroqRoute()) {
+                $t = AI::splitReaction($t, true)[1];
+            } else {
+                $parts = preg_split('/\r?\n/', $t, 2) ?: [$t];
+                if (preg_match('/^\s*reaction\s*:?\s*(.*)$/iu', $parts[0])) {
+                    $t = ltrim($parts[1] ?? '');
+                }
             }
         }
 
@@ -108,23 +106,31 @@ final class LiveReply
             return;
         }
         $len = mb_strlen($text);
-        $now = microtime(true);
 
-        if ($this->mid === null) {
+        $started = $this->mid !== null || ($this->imid !== null && $this->lastLen > 0);
+        if (!$started) {
             if ($len < 12) {
                 return;
             }
-        } elseif ($now - $this->last < $this->every || $len - $this->lastLen < 10) {
+        } elseif ($len === $this->lastLen) {
             return;
         }
 
+        if ($this->imid !== null && $len > 3500) {
+            $text = mb_substr($text, 0, 3500);
+        }
         if (substr_count($text, '```') % 2 === 1) {
             $text .= "\n```";
         }
         $html = AI::toHtml($text) . ' ▍';
         $tg   = App::tg();
 
-        if ($this->mid === null) {
+        if ($this->imid !== null) {
+            $r = $tg->editInline($this->imid, $this->head . $html);
+            if (empty($r['ok']) && stripos((string) ($r['description'] ?? ''), 'not modified') === false) {
+                $this->failures++;
+            }
+        } elseif ($this->mid === null) {
             $r = $tg->reply($this->msg, $html);
             if (!empty($r['ok']) && isset($r['result']['message_id'])) {
                 $this->mid = (int) $r['result']['message_id'];
@@ -137,7 +143,6 @@ final class LiveReply
                 $this->failures++;
             }
         }
-        $this->last    = microtime(true);
         $this->lastLen = $len;
     }
 }

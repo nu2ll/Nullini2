@@ -154,7 +154,7 @@ final class InlineHandler
         if ($job['kind'] === 'ai' && is_array($job['from'] ?? null) && self::smart((string) $job['q'], (array) $job['from'], $imid)) {
             return;
         }
-        $text = self::deferredText((string) $job['kind'], (string) $job['q'], (string) ($job['name'] ?? ''));
+        $text = self::deferredText((string) $job['kind'], (string) $job['q'], (string) ($job['name'] ?? ''), $imid);
         if (empty($tg->editInline($imid, $text)['ok'])) {
             $tg->editInline($imid, strip_tags($text), null, false);
         }
@@ -166,8 +166,10 @@ final class InlineHandler
             Downloader::guest($from, $link, $imid);
             return true;
         }
-        $ctx = ['user_name' => userName($from), 'chat_type' => 'guest'];
-        $res = AI::reply($q, $ctx, [], ['reaction' => false, 'max_tokens' => 1500]);
+        $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
+        $live = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
+        $opt  = ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $res  = AI::reply($q, $ctx, [], $opt);
         if (!empty($res['action'])) {
             [$act, $arg] = $res['action'];
             Users::hit('intent:' . $act);
@@ -180,7 +182,7 @@ final class InlineHandler
                 GuestHandler::show($imid, '', $o);
                 return true;
             }
-            $res = AI::reply($q, ['no_action' => true] + $ctx, [], ['reaction' => false, 'max_tokens' => 1500]);
+            $res = AI::reply($q, ['no_action' => true] + $ctx, [], $opt);
         }
         if (!empty($res['image'])) {
             GuestHandler::image($imid, null, (string) $res['image']);
@@ -189,7 +191,7 @@ final class InlineHandler
         if ($res['answer'] === null) {
             return false;
         }
-        $text = '❓ <b>' . h(mb_substr($q, 0, 300)) . "</b>\n\n🧠 " . AI::toHtml($res['answer']);
+        $text = self::aiHead($q) . AI::toHtml($res['answer']);
         if (mb_strlen($text) > 4000) {
             $text = '🧠 ' . AI::toHtml(mb_substr($res['answer'], 0, 3500)) . '…';
         }
@@ -199,12 +201,18 @@ final class InlineHandler
         return true;
     }
 
-    private static function deferredText(string $kind, string $q, string $name): string
+    private static function aiHead(string $q): string
+    {
+        return '❓ <b>' . h(mb_substr($q, 0, 300)) . "</b>\n\n🧠 ";
+    }
+
+    private static function deferredText(string $kind, string $q, string $name, string $imid): string
     {
         if ($kind === 'ai') {
-            $res    = AI::reply($q, ['user_name' => $name, 'chat_type' => 'inline'], [], ['reaction' => false, 'max_tokens' => 1500]);
+            $live   = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
+            $res    = AI::reply($q, ['user_name' => $name, 'chat_type' => 'inline'], [], ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []));
             $answer = $res['answer'] ?? AI::FAIL_TEXT;
-            $text   = '❓ <b>' . h(mb_substr($q, 0, 300)) . "</b>\n\n🧠 " . AI::toHtml($answer);
+            $text   = self::aiHead($q) . AI::toHtml($answer);
             if (mb_strlen($text) > 4000) {
                 $text = '🧠 ' . AI::toHtml(mb_substr($answer, 0, 3500)) . '…';
             }

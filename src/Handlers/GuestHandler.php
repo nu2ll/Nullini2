@@ -58,8 +58,10 @@ final class GuestHandler
         $body    = trim(implode("\n", $notes) . ($q !== '' ? "\n\n{$q}" : ''));
         $content = $parts ? array_merge($parts, [['type' => 'text', 'text' => $body ?: 'سلام']]) : ($body ?: 'سلام');
 
-        $ctx = ['user_name' => userName($from), 'chat_type' => 'guest'];
-        $res = AI::reply($content, $ctx, [], ['reaction' => false, 'max_tokens' => 1500]);
+        $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
+        $live = $imid !== null && App::cfg('ai_stream', true) ? new LiveReply($msg, $imid, '', false) : null;
+        $opt  = ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $res  = AI::reply($content, $ctx, [], $opt);
 
         if (!empty($res['action'])) {
             [$act, $arg] = $res['action'];
@@ -73,13 +75,13 @@ final class GuestHandler
                 self::show($imid, $qid, $o);
                 return;
             }
-            $res = AI::reply($content, ['no_action' => true] + $ctx, [], ['reaction' => false, 'max_tokens' => 1500]);
+            $res = AI::reply($content, ['no_action' => true] + $ctx, [], $opt);
         }
 
         if ($res['answer'] === null && empty($res['image']) && $parts) {
             logWarn('guest', 'reply with media failed, retrying text-only');
             $note = '[کاربر به یه عکس یا ویس اشاره کرده ولی تو به محتواش دسترسی نداری؛ اگه سؤالش به اون بستگی داره، مؤدبانه بگو تو این چت فایل رو نمی‌بینی و بهتره تو پیوی برات بفرسته]';
-            $res  = AI::reply(trim($note . ($rt !== '' ? "\n[متن پیام ریپلای‌شده]: {$rt}" : '') . ($q !== '' ? "\n\n{$q}" : '')), $ctx, [], ['reaction' => false, 'max_tokens' => 1500]);
+            $res  = AI::reply(trim($note . ($rt !== '' ? "\n[متن پیام ریپلای‌شده]: {$rt}" : '') . ($q !== '' ? "\n\n{$q}" : '')), $ctx, [], $opt);
         }
 
         if (!empty($res['image'])) {

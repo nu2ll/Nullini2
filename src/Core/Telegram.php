@@ -52,7 +52,7 @@ final class Telegram
             }
         }
 
-        for ($attempt = 0; $attempt < 3; $attempt++) {
+        while (true) {
             $ch = $this->handle();
             curl_setopt_array($ch, [
                 CURLOPT_URL            => $this->base . $method,
@@ -81,10 +81,8 @@ final class Telegram
 
                 if ($code === 429) {
                     $wait = (int) ($data['parameters']['retry_after'] ?? 1);
-                    if ($wait <= 15) {
-                        sleep(max(1, $wait));
-                        continue;
-                    }
+                    sleep(max(1, $wait));
+                    continue;
                 }
                 if (stripos($desc, 'not modified') === false && stripos($desc, 'query is too old') === false && !($code === 409 && $method === 'getUpdates')) {
                     logWarn('tg', "{$method} {$code}: {$desc}");
@@ -92,7 +90,6 @@ final class Telegram
             }
             return $data;
         }
-        return null;
     }
 
     public function multi(string $method, array $list, int $timeout = 10): array
