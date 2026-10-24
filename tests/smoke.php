@@ -223,7 +223,7 @@ check('dl aparat gone', Downloader::match('https://www.aparat.com/v/abc'), null)
 check('dl find in text', Downloader::find('اینو برام دانلود کن https://youtu.be/dQw4w9WgXcQ لطفا')['site'] ?? '', 'youtube');
 check('photo insta code', Photos::igCode('https://www.instagram.com/p/C1a2B3c4D5e/?img_index=1'), 'C1a2B3c4D5e');
 check('photo unescape', Photos::unescape('https:\\/\\/x.com\\/a.jpg?b=1\\u0026c=2'), 'https://x.com/a.jpg?b=1&c=2');
-check('intent download', Intent::parse('ACTION: download | https://youtu.be/x'), ['download', 'https://youtu.be/x']);
+check('intent download', Intent::parse('[[download | https://youtu.be/x]]'), ['download', 'https://youtu.be/x']);
 check('help page 1', Ui::helpPage('ai'), 1);
 check('help page 2', Ui::helpPage('group'), 2);
 check('help menu split', count(Ui::helpMenu(true, 1)['inline_keyboard']) + count(Ui::helpMenu(true, 2)['inline_keyboard']), 14);
@@ -258,8 +258,8 @@ check('roast token user', Roast::token('نالینی @ali_reza رو روست ک�
 check('roast token id', Roast::token('روست کن ۱۲۳۴۵۶۷۸۹'), '123456789');
 check('roast token me', Roast::token('me'), 'me');
 check('roast token reply', Roast::token('اینو روست کن'), '');
-check('intent roast', Intent::parse('ACTION: roast | reply'), ['roast', 'reply']);
-check('intent love', Intent::parse('ACTION: love | علی | سارا'), ['love', 'علی | سارا']);
+check('intent roast', Intent::parse('[[roast | reply]]'), ['roast', 'reply']);
+check('intent love', Intent::parse('[[love | علی | سارا]]'), ['love', 'علی | سارا']);
 check('dl bar', Downloader::bar(40), '▰▰▰▰▱▱▱▱▱▱');
 check('dl clock', Downloader::clock(3725), '1:02:05');
 check('dl explain bot', str_contains(Downloader::explain("ERROR: Sign in to confirm you're not a bot"), 'ربات'), true);
@@ -283,10 +283,10 @@ check('gw dup', $dup, 0);
 check('gw count', Giveaway::count('abc'), 1);
 check('gw text', str_contains(Giveaway::publicText(['prize' => 'P', 'winners' => 2, 'ends' => 0], 5), '۵'), true);
 check('gw pending', Giveaway::pending(), false);
-check('intent loose', Intent::parse('**ACTION: wiki | Hafez**'), ['wiki', 'Hafez']);
-check('intent parse', Intent::parse('ACTION: weather | Tehran'), ['weather', 'Tehran']);
-check('intent translate', Intent::parse("ACTION: translate | English | سلام\nخوبی"), ['translate', "English | سلام\nخوبی"]);
-check('intent parse bad', Intent::parse('ACTION: hack'), null);
+check('intent loose', Intent::parse('**[[wiki | Hafez]]**'), ['wiki', 'Hafez']);
+check('intent parse', Intent::parse('[[weather | Tehran]]'), ['weather', 'Tehran']);
+check('intent translate', Intent::parse("[[translate | English | سلام\nخوبی]]"), ['translate', "English | سلام\nخوبی"]);
+check('intent parse bad', Intent::parse('[[hack]]'), null);
 check('intent parse none', Intent::parse('سلام'), null);
 
 $buf = '';
@@ -299,7 +299,7 @@ check('live hold reaction', $body->invoke($live, 'REACTION: 🔥', false), null)
 check('live strip reaction', $body->invoke($live, "REACTION: 🔥\n\nسلام، خوبی؟", false), 'سلام، خوبی؟');
 check('live persian first', $body->invoke($live, 'سلام', false), 'سلام');
 check('live image hidden', $body->invoke($live, "REACTION: 🎨\nIMAGE: a cat in space", false), false);
-check('live action hidden', $body->invoke($live, "REACTION: 👍\nACTION: weather | Tehran", false), false);
+check('live action hidden', $body->invoke($live, "REACTION: 👍\n[[weather | Tehran]]", false), false);
 check('live hold english', $body->invoke($live, "REACTION: 👍\nACT", false), null);
 check('live hold command word', $body->invoke($live, "REACTION: 👍\nACTION", false), null);
 check('live english ok', $body->invoke($live, "REACTION: 👍\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
