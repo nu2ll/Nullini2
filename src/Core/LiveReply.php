@@ -6,7 +6,7 @@
  */
 final class LiveReply
 {
-    private const COMMANDS = ['ACTION', 'IMAGE'];
+    private const COMMANDS = ['IMAGE'];
 
     private array $ids    = [];
     private array $sent   = [];
@@ -100,12 +100,18 @@ final class LiveReply
             return null;
         }
 
+        if (preg_match('/^\s*\[\[\s*(' . implode('|', Intent::NAMES) . ')(?![A-Za-z])/iu', $t)) {
+            return false;
+        }
+        if (!$final && preg_match('/^\s*\[{1,2}\s*[A-Za-z]*$/u', $t)) {
+            return null;
+        }
+
         if (preg_match('/^[\s*`«»]*([A-Za-z]+)(.*)$/su', $t, $w)) {
             if (!$final && trim($w[2]) === '') {
                 return null;
             }
-            if (preg_match('/^[\s*`«»]*(' . implode('|', self::COMMANDS) . ')\s*[:：]/iu', $t)
-                || preg_match('/^[\s*`«»]*(' . implode('|', Intent::NAMES) . ')\s*[|｜:：]/iu', $t)) {
+            if (preg_match('/^[\s*`«»]*(' . implode('|', self::COMMANDS) . ')\s*[:：]/iu', $t)) {
                 return false;
             }
         }
