@@ -32,7 +32,8 @@ final class Intent
     {
         $text = trim(str_replace(['**', '`', '«', '»'], '', $text));
         if (!preg_match('/^\s*ACTION\s*[:：]\s*([a-z]+)\s*(?:[|｜]\s*(.*))?$/imsu', $text, $m)
-            && !preg_match('/^\s*(' . implode('|', self::NAMES) . ')\s*[|｜]\s*(.+)$/imsu', $text, $m)) {
+            && !preg_match('/^\s*(' . implode('|', self::NAMES) . ')\s*[|｜]\s*(.+)$/imsu', $text, $m)
+            && !preg_match('/^\s*(' . implode('|', self::NAMES) . ')\s*[:：]\s*(.+)$/isu', $text, $m)) {
             return null;
         }
         $name = strtolower($m[1]);

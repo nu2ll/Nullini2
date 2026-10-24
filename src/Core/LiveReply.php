@@ -105,7 +105,7 @@ final class LiveReply
                 return null;
             }
             if (preg_match('/^[\s*`«»]*(' . implode('|', self::COMMANDS) . ')\s*[:：]/iu', $t)
-                || preg_match('/^[\s*`«»]*(' . implode('|', Intent::NAMES) . ')\s*[|｜]/iu', $t)) {
+                || preg_match('/^[\s*`«»]*(' . implode('|', Intent::NAMES) . ')\s*[|｜:：]/iu', $t)) {
                 return false;
             }
         }
