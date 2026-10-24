@@ -298,7 +298,7 @@ final class FreeAI
                 return ['text' => null, 'kind' => 'timeout', 'seen' => $seen];
             }
             $idx = ($start + $i) % $n;
-            $r   = is_callable($opt['stream'] ?? null)
+            $r   = $prov !== 'groq' && is_callable($opt['stream'] ?? null)
                 ? self::streamOnce($url, $payload, $keys[$idx], (int) max(5, min($left, 55)), $opt['stream'])
                 : Http::postJson($url, $payload, ['Authorization: Bearer ' . $keys[$idx]], (int) max(5, min($left, $cap)));
 
