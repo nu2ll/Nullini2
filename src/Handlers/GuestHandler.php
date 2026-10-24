@@ -45,6 +45,8 @@ final class GuestHandler
                 $notes[] = '[کاربر روی یه پیام چندرسانه‌ای ریپلای کرده که پیوست شده' . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
             } elseif ($rt !== '') {
                 $notes[] = "[پیامی که کاربر روش ریپلای کرده]: {$rt}";
+            } elseif (!empty($reply['from'])) {
+                $notes[] = '[کاربر روی یه پیام ریپلای کرده که متن نداره]';
             }
         }
         if (isset($msg['photo']) || isset($msg['voice']) || isset($msg['audio'])) {
