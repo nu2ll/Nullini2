@@ -177,7 +177,7 @@ final class InlineHandler
                 Downloader::guest($from, $dl, $imid);
                 return true;
             }
-            $o = Intent::output(['from' => $from, 'chat' => ['type' => 'inline'], 'message_id' => 0], $act, $arg, true);
+            $o = Intent::output(['from' => $from, 'chat' => ['type' => 'inline'], 'message_id' => 0], $act, $arg, true, $imid);
             if ($o !== null) {
                 GuestHandler::show($imid, '', $o);
                 return true;
@@ -191,10 +191,7 @@ final class InlineHandler
         if ($res['answer'] === null) {
             return false;
         }
-        $text = self::aiHead($q) . AI::toHtml($res['answer']);
-        if (mb_strlen($text) > 4000) {
-            $text = '🧠 ' . AI::toHtml(mb_substr($res['answer'], 0, 3500)) . '…';
-        }
+        $text = self::aiHead($q) . AI::toHtml(AI::fit($res['answer'], self::aiHead($q)));
         if (empty(App::tg()->editInline($imid, $text)['ok'])) {
             App::tg()->editInline($imid, strip_tags($text), null, false);
         }
@@ -212,10 +209,7 @@ final class InlineHandler
             $live   = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
             $res    = AI::reply($q, ['user_name' => $name, 'chat_type' => 'inline'], [], ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []));
             $answer = $res['answer'] ?? AI::FAIL_TEXT;
-            $text   = self::aiHead($q) . AI::toHtml($answer);
-            if (mb_strlen($text) > 4000) {
-                $text = '🧠 ' . AI::toHtml(mb_substr($answer, 0, 3500)) . '…';
-            }
+            $text   = self::aiHead($q) . AI::toHtml(AI::fit($answer, self::aiHead($q)));
         } else {
             $out  = AI::translateFast($q);
             $text = h(mb_substr($q, 0, 1500)) . "\n\n🌐 " . ($out !== null ? h($out) : AI::FAIL_TEXT);

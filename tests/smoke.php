@@ -301,6 +301,7 @@ check('live persian first', $body->invoke($live, 'سلام', false), 'سلام')
 check('live image hidden', $body->invoke($live, "REACTION: 🎨\nIMAGE: a cat in space", false), false);
 check('live action hidden', $body->invoke($live, "REACTION: 👍\nACTION: weather | Tehran", false), false);
 check('live hold english', $body->invoke($live, "REACTION: 👍\nACT", false), null);
+check('live hold command word', $body->invoke($live, "REACTION: 👍\nACTION", false), null);
 check('live english ok', $body->invoke($live, "REACTION: 👍\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
 check('live think hidden', $body->invoke($live, "<think>hmm", false), null);
 

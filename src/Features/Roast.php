@@ -133,7 +133,13 @@ final class Roast
         return Store::update('rl', 'roast_' . $uid, static fn($at) => (is_int($at) && time() - $at < self::WAIT) ? null : time()) === null;
     }
 
-    public static function text(array $t): string
+    public static function head(array $t): string
+    {
+        $who = userTag((int) $t['id'], mb_substr((string) $t['name'], 0, 40), (string) ($t['username'] ?? '') ?: null);
+        return '🔥 <b>روست ' . $who . "</b>\n\n";
+    }
+
+    public static function text(array $t, ?LiveReply $live = null): string
     {
         $id    = (int) $t['id'];
         $c     = $id > 0 ? self::chat($id) : null;
@@ -191,23 +197,20 @@ final class Roast
         }
         $prompt = implode("\n", $l);
 
-        $sys = 'تو «نالینی» هستی. فقط متن روست رو بنویس، بدون مقدمه و بدون ** یا #.';
-        $out = AI::chat([['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => array_values(array_filter([$pic, ['type' => 'text', 'text' => $prompt]]))]],
-            ['tier' => 'smart', 'temperature' => 1.0, 'max_tokens' => 2000, 'deadline' => microtime(true) + 60, 'section' => 'roast']);
+        $sys    = 'تو «نالینی» هستی. فقط متن روست رو بنویس، بدون مقدمه و بدون ** یا #.';
+        $stream = $live ? ['stream' => $live->feed(...)] : [];
+        $out    = AI::chat([['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => array_values(array_filter([$pic, ['type' => 'text', 'text' => $prompt]]))]],
+            ['tier' => 'smart', 'temperature' => 1.0, 'max_tokens' => 2000, 'deadline' => microtime(true) + 60, 'section' => 'roast'] + $stream);
         if ($out === null) {
             $out = AI::chat([['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => str_replace('این عکس، عکس پروفایل تلگرامشه.', 'عکس پروفایل داره.', $prompt)]],
-                ['tier' => 'lite', 'temperature' => 1.0, 'max_tokens' => 2000, 'thinking' => null, 'section' => 'roast']);
+                ['tier' => 'lite', 'temperature' => 1.0, 'max_tokens' => 2000, 'thinking' => null, 'section' => 'roast'] + $stream);
         }
         if ($out === null) {
             return AI::FAIL_TEXT;
         }
         Users::hit('roast');
-        $who  = userTag((int) $t['id'], mb_substr((string) $t['name'], 0, 40), (string) ($t['username'] ?? '') ?: null);
-        $body = AI::clean($out);
-        if (mb_strlen($body) > 3800) {
-            $body = mb_substr($body, 0, 3800) . '…';
-        }
-        return '🔥 <b>روست ' . $who . "</b>\n\n" . h($body);
+        $body = AI::fit(AI::clean($out), self::head($t));
+        return self::head($t) . h($body);
     }
 
     public static function pending(array $from, string $tok): array
@@ -232,6 +235,7 @@ final class Roast
         }
         Store::delete('roast', $token);
         $t = $p['tok'] === '' ? self::user((array) $p['from']) + ['quote' => ''] : self::lookup((string) $p['tok']);
-        App::tg()->editInline($imid, $t === null ? '🤷 این آدم رو پیدا نکردم؛' . "\nآیدی عددی یا یوزرنیمش رو درست بنویس." : self::text($t + ['quote' => '']));
+        $live = $t !== null && App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::head($t + ['quote' => '']), false) : null;
+        App::tg()->editInline($imid, $t === null ? '🤷 این آدم رو پیدا نکردم؛' . "\nآیدی عددی یا یوزرنیمش رو درست بنویس." : self::text($t + ['quote' => ''], $live));
     }
 }

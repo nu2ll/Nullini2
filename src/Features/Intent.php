@@ -74,6 +74,9 @@ final class Intent
         if ($o === null) {
             return false;
         }
+        if (!empty($o['live']) && $o['live']->finishHtml($o['text'])) {
+            return true;
+        }
         $reply = ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true];
         if (!empty($o['photo']) || !empty($o['anim'])) {
             $r = $tg->call(!empty($o['photo']) ? 'sendPhoto' : 'sendAnimation', [
@@ -89,7 +92,7 @@ final class Intent
         return true;
     }
 
-    public static function output(array $msg, string $name, string $arg, bool $guest = false): ?array
+    public static function output(array $msg, string $name, string $arg, bool $guest = false, ?string $imid = null): ?array
     {
         $bot   = App::botUsername();
         $reply = (string) ($msg['reply_to_message']['text'] ?? $msg['reply_to_message']['caption'] ?? '');
@@ -189,7 +192,11 @@ final class Intent
                 if ($t !== null && Roast::busy((int) ($msg['from']['id'] ?? 0))) {
                     return ['text' => "⏳ هر دقیقه فقط یه روست!\nیه‌کم دیگه بیا 😅"];
                 }
-                return ['text' => $t === null ? "🤷 این آدم رو پیدا نکردم؛\nآیدی عددی یا یوزرنیمش رو درست بنویس." : Roast::text($t)];
+                if ($t === null) {
+                    return ['text' => "🤷 این آدم رو پیدا نکردم؛\nآیدی عددی یا یوزرنیمش رو درست بنویس."];
+                }
+                $live = App::cfg('ai_stream', true) ? new LiveReply($msg, $imid, Roast::head($t), false) : null;
+                return ['text' => Roast::text($t, $live), 'live' => $live];
 
             case 'userinfo':
                 [$text, $kb] = UserInfo::card($msg['from'], $guest ? null : ($msg['chat']['type'] ?? null));

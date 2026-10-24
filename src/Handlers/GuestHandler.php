@@ -70,7 +70,7 @@ final class GuestHandler
                 Downloader::guest($from, $dl, $imid);
                 return;
             }
-            $o = Intent::output(['from' => $from] + $msg, $act, $arg, true);
+            $o = Intent::output(['from' => $from] + $msg, $act, $arg, true, $imid);
             if ($o !== null) {
                 self::show($imid, $qid, $o);
                 return;
@@ -90,7 +90,7 @@ final class GuestHandler
         }
 
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
-        $html   = AI::toHtml(mb_strlen($answer) > 3900 ? mb_substr($answer, 0, 3900) . '…' : $answer);
+        $html   = AI::toHtml(AI::fit($answer));
         self::edit($imid, $qid, $html, $answer);
     }
 
@@ -173,7 +173,7 @@ final class GuestHandler
             return;
         }
         if (empty($tg->editInline($imid, $html)['ok']) && $plain !== null) {
-            $tg->editInline($imid, mb_substr($plain, 0, 4000), null, false);
+            $tg->editInline($imid, mb_substr($plain, 0, 4096), null, false);
         }
     }
 }

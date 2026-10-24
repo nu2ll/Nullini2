@@ -478,7 +478,7 @@ final class AI
             return $out;
         }
 
-        $text          = self::clean($text);
+        $text          = self::clean($text, $opt['max_len'] ?? 4096);
         $out['answer'] = $text !== '' ? $text : null;
         return $out;
     }
@@ -541,7 +541,7 @@ final class AI
         return [null, $text];
     }
 
-    public static function clean(string $text): string
+    public static function clean(string $text, int $max = 4096): string
     {
         $text = preg_replace('/\*\*(.+?)\*\*/su', '$1', $text) ?? $text;
         $text = preg_replace('/(?<![\*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\*\w])/u', '$1', $text) ?? $text;
@@ -549,10 +549,47 @@ final class AI
         $text = preg_replace('/[\x{200B}\x{200E}\x{200F}\x{FEFF}\x{2060}]/u', '', $text) ?? $text;
         $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
         $text = trim($text);
-        if (mb_strlen($text) > 4000) {
-            $text = mb_substr($text, 0, 3990) . '…';
+        if (mb_strlen($text) > $max) {
+            $text = mb_substr($text, 0, $max - 1) . '…';
         }
         return $text;
+    }
+
+    public static function visible(string $html): int
+    {
+        return mb_strlen(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    }
+
+    public static function fit(string $text, string $head = ''): string
+    {
+        $room = 4096 - self::visible($head);
+        return mb_strlen($text) > $room ? mb_substr($text, 0, $room - 1) . '…' : $text;
+    }
+
+    public static function chunks(string $text, int $limit = 4096): array
+    {
+        $out  = [];
+        $rest = $text;
+        while (mb_strlen($rest) > $limit) {
+            $head = mb_substr($rest, 0, $limit);
+            $at   = $limit;
+            foreach (["\n\n", "\n", ' '] as $sep) {
+                $p = mb_strrpos($head, $sep);
+                if ($p !== false && $p >= (int) ($limit * 0.6)) {
+                    $at = $p;
+                    break;
+                }
+            }
+            $piece = rtrim(mb_substr($rest, 0, $at));
+            $rest  = ltrim(mb_substr($rest, $at), "\n ");
+            if (substr_count($piece, '```') % 2 === 1) {
+                $piece .= "\n```";
+                $rest   = "```\n" . $rest;
+            }
+            $out[] = $piece;
+        }
+        $out[] = $rest;
+        return $out;
     }
 
     public static function toHtml(string $text): string

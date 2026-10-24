@@ -80,13 +80,15 @@ final class Assistant
     private static function send(array $msg, string $answer): void
     {
         $tg = App::tg();
-        $r  = $tg->reply($msg, AI::toHtml($answer));
-        if (empty($r['ok'])) {
-            $tg->call('sendMessage', [
-                'chat_id'          => $msg['chat']['id'],
-                'text'             => mb_substr($answer, 0, 4096),
-                'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
-            ]);
+        foreach (AI::chunks($answer) as $part) {
+            $r = $tg->reply($msg, AI::toHtml($part));
+            if (empty($r['ok'])) {
+                $tg->call('sendMessage', [
+                    'chat_id'          => $msg['chat']['id'],
+                    'text'             => mb_substr($part, 0, 4096),
+                    'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
+                ]);
+            }
         }
     }
 
@@ -151,7 +153,7 @@ final class Assistant
 
         $history = $service ? [] : self::history($chatId, $userId);
         $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
-        $opt     = $live ? ['on_text' => $live->feed(...)] : [];
+        $opt     = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res     = AI::reply($content, $ctx, $history, $opt);
 
         if ($res['reaction'] !== null) {
