@@ -34,10 +34,17 @@ return [
         ],
         'free_order'  => [
             'groq' => envList('GROQ_MODELS'),
+            'duck' => envList('DUCK_MODELS', [
+                'gpt-6-luna', 'gpt-5.6-luna', 'claude-haiku-4-5', 'gpt-5.4-mini',
+                'mistral-small-2603', 'tinfoil/gemma4-31b', 'tinfoil/gpt-oss-120b', 'gpt-5.4-nano',
+            ]),
         ],
         'free_keys'   => [
             'groq'       => envList('GROQ_KEYS'),
+            'duck'       => envList('DUCK_KEYS'),
         ],
+        'duck_url'    => rtrim((string) env('DUCK_URL', ''), '/'),
+        'duck_image'  => env('DUCK_IMAGE', '1') !== '0',
     ],
     'storage_chat' => env('STORAGE_CHAT_ID', ''),
     'ai_memory_messages' => (int) env('AI_MEMORY_MESSAGES', 20),

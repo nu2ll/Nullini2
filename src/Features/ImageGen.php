@@ -34,6 +34,15 @@ final class ImageGen
 
     public static function generate(string $prompt, callable $tick): ?string
     {
+        [$prov, $model] = explode(':', AI::route(), 2) + [1 => ''];
+        if (FreeAI::imageEnabled($prov)) {
+            $bytes = self::viaGateway($prov, $model, $prompt, $tick);
+            if ($bytes !== null) {
+                return $bytes;
+            }
+            logWarn('image', "{$prov}: gateway image failed, falling back to pollinations");
+        }
+
         $size  = (int) App::cfg('image_size', 1024);
         $key   = trim((string) App::cfg('pollinations_api_key', ''));
         $query = http_build_query([
@@ -56,9 +65,25 @@ final class ImageGen
         return null;
     }
 
-    private static function fetch(string $url, string $key, callable $tick): ?string
+    private static function viaGateway(string $prov, string $model, string $prompt, callable $tick): ?string
     {
-        $headers = ['Accept: image/*'];
+        $payload = ['prompt' => $prompt, 'n' => 1, 'response_format' => 'b64_json'];
+        if ($model !== '') {
+            $payload['model'] = $model;
+        }
+        $raw = self::fetch(FreeAI::base($prov) . '/images/generations', (string) (FreeAI::keys($prov)[0] ?? ''), $tick, $payload);
+        $j   = $raw !== null ? json_decode($raw, true) : null;
+        $b64 = is_array($j) ? ($j['data'][0]['b64_json'] ?? null) : null;
+        $bin = is_string($b64) ? base64_decode($b64, true) : false;
+        if ($bin === false || $bin === '' || @getimagesizefromstring($bin) === false) {
+            return null;
+        }
+        return $bin;
+    }
+
+    private static function fetch(string $url, string $key, callable $tick, ?array $json = null): ?string
+    {
+        $headers = $json === null ? ['Accept: image/*'] : ['Accept: application/json', 'Content-Type: application/json'];
         if ($key !== '') {
             $headers[] = 'Authorization: Bearer ' . $key;
         }
@@ -71,6 +96,10 @@ final class ImageGen
             CURLOPT_HTTPHEADER     => $headers,
             CURLOPT_USERAGENT      => 'Mozilla/5.0 NulliniBot/3.0',
         ]);
+        if ($json !== null) {
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($json, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE));
+        }
 
         $mh = curl_multi_init();
         curl_multi_add_handle($mh, $ch);
@@ -92,7 +121,7 @@ final class ImageGen
         curl_close($ch);
         curl_multi_close($mh);
 
-        if ($code !== 200 || !is_string($raw) || $raw === '' || @getimagesizefromstring($raw) === false) {
+        if ($code !== 200 || !is_string($raw) || $raw === '' || ($json === null && @getimagesizefromstring($raw) === false)) {
             logWarn('image', "generation failed (HTTP {$code})");
             return null;
         }

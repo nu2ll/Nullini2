@@ -5,6 +5,9 @@ putenv("SQLITE_PATH={$db}");
 putenv('DATABASE_URL=');
 putenv('GITHUB_TOKEN=');
 putenv('GEMINI_KEYS=');
+putenv('GROQ_KEYS=');
+putenv('DUCK_URL=http://127.0.0.1:9/v1/');
+putenv('DUCK_KEYS=testtoken');
 putenv('BOT_USERNAME=TestBot');
 putenv('LOG_TO_STDERR=1');
 
@@ -304,6 +307,22 @@ check('live hold english', $body->invoke($live, "REACTION: 👍\nACT", false), n
 check('live hold command word', $body->invoke($live, "REACTION: 👍\nACTION", false), null);
 check('live english ok', $body->invoke($live, "REACTION: 👍\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
 check('live think hidden', $body->invoke($live, "<think>hmm", false), null);
+
+check('duck provider known', FreeAI::valid('duck:gpt-5.4-mini'), true);
+check('duck base trims slash', FreeAI::base('duck'), 'http://127.0.0.1:9/v1');
+check('duck active', isset(FreeAI::active()['duck']), true);
+check('duck no stt', FreeAI::canTranscribe('duck'), false);
+check('duck image on', FreeAI::imageEnabled('duck'), true);
+check('groq image off', FreeAI::imageEnabled('groq'), false);
+check('voice on gemini', AI::voiceSupported(), true);
+AI::setRoute('duck:gpt-5.4-mini');
+check('route duck set', AI::route(), 'duck:gpt-5.4-mini');
+check('voice off on duck', AI::voiceSupported(), false);
+check('duck uses loose reaction', AI::isGroqRoute(), true);
+AI::setRoute('gemini');
+check('route back to gemini', AI::route(), 'gemini');
+check('gemini keeps strict reaction', AI::isGroqRoute(), false);
+check('voice on gemini again', AI::voiceSupported(), true);
 
 @unlink($db);
 @unlink($db . '-wal');

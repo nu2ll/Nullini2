@@ -4,6 +4,7 @@ final class FreeAI
 {
     public const PROVIDERS = [
         'groq'       => ['name' => 'Groq', 'url' => 'https://api.groq.com/openai/v1'],
+        'duck'       => ['name' => 'Duck.ai', 'url' => ''],
     ];
 
     private const SKIP = '/embed|whisper|tts|guard|moderat|rerank|orpheus|playai|transcri|speech|diffusion|flux|ocr|safety|reward|retriev|parakeet|canary/i';
@@ -14,11 +15,31 @@ final class FreeAI
         return array_values(array_unique(array_filter($keys, static fn($k) => $k !== '')));
     }
 
+    public static function base(string $prov): string
+    {
+        if ($prov === 'duck') {
+            return rtrim((string) (App::cfg('ai', [])['duck_url'] ?? ''), '/');
+        }
+        return (string) (self::PROVIDERS[$prov]['url'] ?? '');
+    }
+
+    public static function canTranscribe(string $prov): bool
+    {
+        $models = array_filter(array_map('strval', (array) (App::cfg('ai', [])['free_stt'][$prov] ?? [])));
+        return isset(self::PROVIDERS[$prov]) && self::keys($prov) && $models;
+    }
+
+    public static function imageEnabled(string $prov): bool
+    {
+        return $prov === 'duck' && self::keys($prov) && self::base($prov) !== ''
+            && ((App::cfg('ai', [])['duck_image'] ?? true) !== false);
+    }
+
     public static function active(): array
     {
         $out = [];
         foreach (self::PROVIDERS as $id => $p) {
-            if (self::keys($id)) {
+            if (self::keys($id) && self::base($id) !== '') {
                 $out[$id] = $p['name'];
             }
         }
@@ -60,7 +81,7 @@ final class FreeAI
     private static function fetch(string $prov): ?array
     {
         $keys = self::keys($prov);
-        $rows = Http::getJson(self::PROVIDERS[$prov]['url'] . '/models', $keys ? ['Authorization: Bearer ' . $keys[0]] : [], 20)['data'] ?? null;
+        $rows = Http::getJson(self::base($prov) . '/models', $keys ? ['Authorization: Bearer ' . $keys[0]] : [], 20)['data'] ?? null;
         if (!is_array($rows)) {
             logWarn('ai', "{$prov}: model list failed");
             return null;
@@ -72,7 +93,7 @@ final class FreeAI
             if ($id === '' || preg_match(self::SKIP, $id) || ($m['active'] ?? true) === false) {
                 continue;
             }
-            $name   = $id;
+            $name   = $prov === 'duck' ? (string) ($m['name'] ?? $id) : $id;
             $vision = null;
             $out[] = ['id' => $id, 'name' => $name, 'vision' => $vision];
         }
@@ -87,7 +108,7 @@ final class FreeAI
     public static function chat(string $route, array $messages, array $opt = []): ?string
     {
         [$prov, $model] = explode(':', $route, 2) + [1 => ''];
-        if (!isset(self::PROVIDERS[$prov]) || !self::keys($prov)) {
+        if (!isset(self::PROVIDERS[$prov]) || !self::keys($prov) || self::base($prov) === '') {
             return null;
         }
         if ($model !== '') {
@@ -134,7 +155,7 @@ final class FreeAI
                     break 2;
                 }
                 $idx = ($start + $i) % $n;
-                $r   = Http::request('POST', self::PROVIDERS[$prov]['url'] . '/audio/transcriptions', [
+                $r   = Http::request('POST', self::base($prov) . '/audio/transcriptions', [
                     'headers' => ['Authorization: Bearer ' . $keys[$idx]],
                     'body'    => ['file' => new CURLFile($file, $mime, 'voice.' . $ext), 'model' => $model, 'response_format' => 'json', 'temperature' => '0'],
                     'timeout' => (int) max(5, min($left, 20)),
@@ -286,7 +307,7 @@ final class FreeAI
         ];
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
         $cap      = $prov === 'groq' ? 10 : (int) ($opt['per_try'] ?? 45);
-        $url      = self::PROVIDERS[$prov]['url'] . '/chat/completions';
+        $url      = self::base($prov) . '/chat/completions';
         $n        = count($keys);
         $start    = random_int(0, $n - 1);
         $merged   = false;

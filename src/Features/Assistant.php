@@ -47,6 +47,9 @@ final class Assistant
     {
         $tg = App::tg();
         if (isset($m['voice']) || isset($m['audio'])) {
+            if (!AI::voiceSupported()) {
+                return null;
+            }
             $a     = $m['voice'] ?? $m['audio'];
             $bytes = ($a['file_size'] ?? 0) <= 15_000_000 ? $tg->download($a['file_id']) : null;
             return $bytes ? ['type' => 'media', 'mime' => $a['mime_type'] ?? 'audio/ogg', 'data' => base64_encode($bytes)] : null;
@@ -100,6 +103,10 @@ final class Assistant
         $from     = $msg['from'] ?? [];
         $userId   = (int) ($from['id'] ?? 0);
         $service  = AI::isServiceSender($from, $msg['sender_chat'] ?? null);
+
+        if ((isset($msg['voice']) || isset($msg['audio'])) && !AI::voiceSupported()) {
+            return;
+        }
 
         $tg->action($chatId, 'typing');
         Users::hit($chatType === 'private' ? 'ai:private' : 'ai:group');
