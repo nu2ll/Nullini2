@@ -57,9 +57,53 @@ final class ImageGen
         return self::fetch($m[0], '', $tick);
     }
 
+    /** ساخت عکس با Gemini (Nano Banana)؛ اگه سهمیه تموم شد یا خطا داد null برمی‌گردونه تا سرویس‌های بعدی امتحان بشن. */
+    private static function gemini(string $prompt, callable $tick): ?string
+    {
+        if (!App::cfg('image_gemini', true)) {
+            return null;
+        }
+        $keys   = AI::keys();
+        $models = array_values(array_filter(array_map('trim', (array) App::cfg('image_gemini_models', []))));
+        if (!$keys || !$models) {
+            return null;
+        }
+        shuffle($keys);
+        $tries = 0;
+        foreach ($models as $model) {
+            foreach (array_slice($keys, 0, 3) as $key) {
+                if (++$tries > 4) {
+                    return null;
+                }
+                $tick();
+                $r = Http::postJson(
+                    'https://generativelanguage.googleapis.com/v1beta/models/' . $model . ':generateContent',
+                    [
+                        'contents'         => [['role' => 'user', 'parts' => [['text' => 'Generate an image: ' . $prompt]]]],
+                        'generationConfig' => ['responseModalities' => ['TEXT', 'IMAGE']],
+                    ],
+                    ['x-goog-api-key: ' . $key],
+                    90
+                );
+                foreach ((array) ($r['data']['candidates'][0]['content']['parts'] ?? []) as $part) {
+                    $b64 = $part['inlineData']['data'] ?? $part['inline_data']['data'] ?? null;
+                    $raw = is_string($b64) ? base64_decode($b64, true) : false;
+                    if ($raw !== false && $raw !== '' && @getimagesizefromstring($raw) !== false) {
+                        return $raw;
+                    }
+                }
+                logWarn('image', "gemini {$model} failed (HTTP {$r['code']}): " . mb_substr((string) ($r['data']['error']['message'] ?? $r['data']['candidates'][0]['finishReason'] ?? $r['raw']), 0, 160));
+                if ($r['code'] === 404) {
+                    break; // این مدل وجود نداره؛ برو سراغ مدل بعدی
+                }
+            }
+        }
+        return null;
+    }
+
     public static function generate(string $prompt, callable $tick): ?string
     {
-        $bytes = self::topTools($prompt, $tick);
+        $bytes = self::gemini($prompt, $tick) ?? self::topTools($prompt, $tick);
         if ($bytes !== null) {
             return $bytes;
         }
