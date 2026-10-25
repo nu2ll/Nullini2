@@ -173,9 +173,8 @@ final class Assistant
         }
 
         if (!empty($res['image'])) {
-            $live?->discard();
             Users::hit('image');
-            if (ImageGen::draw($msg, $res['image']) && !$service) {
+            if (ImageGen::draw($msg, $res['image'], null, $live) && !$service) {
                 self::remember($chatId, $userId, $log, '[یه عکس براش ساختم: ' . mb_substr($res['image'], 0, 200) . ']');
             }
             return;

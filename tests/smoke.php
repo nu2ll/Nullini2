@@ -104,11 +104,9 @@ check('ai route label groq auto', AiPanel::label('groq'), 'Groq · خودکار'
 check('ai route label gemini', AiPanel::label('gemini'), 'Gemini · خودکار');
 AI::setRoute('gemini');
 check('ai route back to auto', AI::route(), 'gemini');
-check('react prefix', AI::splitReaction("REACTION: 🤔\n\nسلام", true), ['🤔', 'سلام']);
-check('react bare emoji line', AI::splitReaction("🤔\n\nچیزی می‌خوای؟", true), ['🤔', 'چیزی می‌خوای؟']);
-check('react alias', AI::splitReaction("REACTION: 😂\n\nx", true)[0], '🤣');
-check('react plain text kept', AI::splitReaction('Reaction time is short', true), [null, 'Reaction time is short']);
-check('react bare off', AI::splitReaction("🤔\n\nx", false)[0], null);
+check('react prefix', AI::splitReaction("[[reaction | 🤔]]\n\nسلام"), ['🤔', 'سلام']);
+check('react alias', AI::splitReaction("[[reaction | 😂]]\n\nx")[0], '🤣');
+check('react plain text kept', AI::splitReaction('Reaction time is short'), [null, 'Reaction time is short']);
 $panel = AiPanel::providerKeyboard('gemini', 0)['inline_keyboard'];
 check('panel auto first', $panel[0][0]['callback_data'], 'ai:set:gemini:a:0');
 check('panel gemini models listed', count(AI::allModels()) > 0 && count($panel) >= 3, true);
@@ -295,14 +293,14 @@ check('sse rest', Http::sseData($buf, ":2}\n\ndata: [DONE]\n"), ['{"b":2}', '[DO
 
 $live = new LiveReply(['chat' => ['id' => 1, 'type' => 'private'], 'message_id' => 1]);
 $body = new ReflectionMethod($live, 'body');
-check('live hold reaction', $body->invoke($live, 'REACTION: 🔥', false), null);
-check('live strip reaction', $body->invoke($live, "REACTION: 🔥\n\nسلام، خوبی؟", false), 'سلام، خوبی؟');
+check('live hold reaction', $body->invoke($live, '[[reaction | 🔥]]', false), null);
+check('live strip reaction', $body->invoke($live, "[[reaction | 🔥]]\n\nسلام، خوبی؟", false), 'سلام، خوبی؟');
 check('live persian first', $body->invoke($live, 'سلام', false), 'سلام');
-check('live image hidden', $body->invoke($live, "REACTION: 🎨\nIMAGE: a cat in space", false), false);
-check('live action hidden', $body->invoke($live, "REACTION: 👍\n[[weather | Tehran]]", false), false);
-check('live hold english', $body->invoke($live, "REACTION: 👍\nACT", false), null);
-check('live hold command word', $body->invoke($live, "REACTION: 👍\nACTION", false), null);
-check('live english ok', $body->invoke($live, "REACTION: 👍\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
+check('live image hidden', $body->invoke($live, "[[reaction | 🎨]]\n[[image | a cat in space]]", false), false);
+check('live action hidden', $body->invoke($live, "[[reaction | 👍]]\n[[weather | Tehran]]", false), false);
+check('live hold english', $body->invoke($live, "[[reaction | 👍]]\nACT", false), null);
+check('live hold command word', $body->invoke($live, "[[reaction | 👍]]\nACTION", false), null);
+check('live english ok', $body->invoke($live, "[[reaction | 👍]]\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
 check('live think hidden', $body->invoke($live, "<think>hmm", false), null);
 
 @unlink($db);

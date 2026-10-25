@@ -32,8 +32,37 @@ final class ImageGen
         return $chat === '' ? null : App::tg()->photoFileId($chat, $bytes);
     }
 
+    private static function topTools(string $prompt, callable $tick): ?string
+    {
+        $keys = FreeAI::keys('toptools');
+        if (!$keys) {
+            return null;
+        }
+        $key = $keys[array_rand($keys)];
+        $tick();
+        $r = Http::postJson(
+            FreeAI::PROVIDERS['toptools']['url'] . '/chat/completions',
+            [
+                'model'    => App::cfg('image_toptools_model', 'top-tools-ai'),
+                'messages' => [['role' => 'user', 'content' => 'Generate an image: ' . $prompt]],
+            ],
+            ['Authorization: Bearer ' . $key],
+            120
+        );
+        $text = (string) ($r['data']['choices'][0]['message']['content'] ?? '');
+        if ($r['code'] !== 200 || !preg_match('~https?://[^\s)\]>"\']+~u', $text, $m)) {
+            logWarn('image', "toptools failed (HTTP {$r['code']}): " . mb_substr((string) ($r['data']['error']['message'] ?? $text ?: $r['raw']), 0, 160));
+            return null;
+        }
+        return self::fetch($m[0], '', $tick);
+    }
+
     public static function generate(string $prompt, callable $tick): ?string
     {
+        $bytes = self::topTools($prompt, $tick);
+        if ($bytes !== null) {
+            return $bytes;
+        }
         $size  = (int) App::cfg('image_size', 1024);
         $key   = trim((string) App::cfg('pollinations_api_key', ''));
         $query = http_build_query([
@@ -99,44 +128,69 @@ final class ImageGen
         return $raw;
     }
 
+    private static function status(array $msg): ?int
+    {
+        $r = App::tg()->reply($msg, LiveReply::DRAWING);
+        return isset($r['result']['message_id']) ? (int) $r['result']['message_id'] : null;
+    }
+
+    private static function clear(int|string $chatId, ?LiveReply $live, ?int $statusId): void
+    {
+        if ($live?->active()) {
+            $live->discard();
+        }
+        if ($statusId !== null) {
+            App::tg()->call('deleteMessage', ['chat_id' => $chatId, 'message_id' => $statusId], 8);
+        }
+    }
+
     public static function handle(array $msg, string $request): void
     {
-        $tg     = App::tg();
-        $chatId = $msg['chat']['id'];
+        $tg       = App::tg();
+        $chatId   = $msg['chat']['id'];
         $tg->action($chatId, 'upload_photo');
         Users::hit('image');
+        $statusId = self::status($msg);
 
         $en = AI::googleTranslate($request, 'English');
         if ($en !== null) {
-            self::draw($msg, $en);
+            self::draw($msg, $en, null, null, $statusId);
             return;
         }
         $plan = AI::imagePrompt($request);
         if ($plan === null) {
+            self::clear($chatId, null, $statusId);
             $tg->reply($msg, '😕 الان نتونستم درخواستت رو بفهمم؛' . "\n" . 'یه‌کم دیگه دوباره بگو.');
             return;
         }
         if ($plan['status'] === 'refuse') {
+            self::clear($chatId, null, $statusId);
             $tg->reply($msg, '🙅 این یکی رو نمی‌کشم؛' . "\n" . 'یه چیز دیگه بگو 😅');
             return;
         }
 
-        self::draw($msg, $plan['prompt'], $plan['caption'] ?? null);
+        self::draw($msg, $plan['prompt'], $plan['caption'] ?? null, null, $statusId);
     }
 
-    public static function draw(array $msg, string $prompt, ?string $caption = null): bool
+    public static function draw(array $msg, string $prompt, ?string $caption = null, ?LiveReply $live = null, ?int $statusId = null): bool
     {
         $tg     = App::tg();
         $chatId = $msg['chat']['id'];
         $tg->action($chatId, 'upload_photo');
+        if ($statusId === null && !$live?->active()) {
+            $statusId = self::status($msg);
+        }
         $bytes = self::generate($prompt, static fn() => $tg->action($chatId, 'upload_photo'));
         if ($bytes === null) {
+            self::clear($chatId, $live, $statusId);
             $tg->reply($msg, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
             return false;
         }
         $captions = ['🎨 بفرما، اینم عکست!', '🖼 اینم از این، امیدوارم خوشت بیاد!', '✨ تازه از زیر قلمم دراومده!'];
         $cap      = h($caption ?? $captions[array_rand($captions)]);
-        if (!$tg->sendPhotoBytes($chatId, $bytes, $cap, $msg['message_id'] ?? null)) {
+        $sent = $tg->sendPhotoBytes($chatId, $bytes, $cap, $msg['message_id'] ?? null);
+        self::clear($chatId, $live, $statusId);
+        if (!$sent) {
             $tg->reply($msg, '😕 عکس ساخته شد ولی ارسالش به مشکل خورد؛' . "\n" . 'دوباره امتحان کن.');
             return false;
         }
