@@ -2,6 +2,20 @@
 
 final class ImageGen
 {
+    private static ?string $notice = null;
+
+    public static function notice(): ?string
+    {
+        return self::$notice;
+    }
+
+    private static function failText(): string
+    {
+        return self::$notice !== null
+            ? '😕 ' . h(mb_substr(self::$notice, 0, 400))
+            : "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.";
+    }
+
     private const ENDPOINTS = [
         'https://image.pollinations.ai/prompt/',
         'https://gen.pollinations.ai/image/',
@@ -50,6 +64,10 @@ final class ImageGen
             120
         );
         $text = (string) ($r['data']['choices'][0]['message']['content'] ?? '');
+        if ($r['code'] === 200 && trim($text) !== '' && !preg_match('~https?://[^\s)\]>"\']+~u', $text)) {
+            self::$notice = trim($text);
+            return null;
+        }
         if ($r['code'] !== 200 || !preg_match('~https?://[^\s)\]>"\']+~u', $text, $m)) {
             logWarn('image', "toptools failed (HTTP {$r['code']}): " . mb_substr((string) ($r['data']['error']['message'] ?? $text ?: $r['raw']), 0, 160));
             return null;
@@ -57,55 +75,62 @@ final class ImageGen
         return self::fetch($m[0], '', $tick);
     }
 
-    /** ساخت عکس با Gemini (Nano Banana)؛ اگه سهمیه تموم شد یا خطا داد null برمی‌گردونه تا سرویس‌های بعدی امتحان بشن. */
-    private static function gemini(string $prompt, callable $tick): ?string
+    private static function cloudflare(string $prompt, callable $tick): ?string
     {
-        if (!App::cfg('image_gemini', true)) {
+        $account = trim((string) App::cfg('cloudflare_account_id', ''));
+        $token   = trim((string) App::cfg('cloudflare_api_token', ''));
+        if ($account === '' || $token === '') {
             return null;
         }
-        $keys   = AI::keys();
-        $models = array_values(array_filter(array_map('trim', (array) App::cfg('image_gemini_models', []))));
-        if (!$keys || !$models) {
-            return null;
-        }
-        shuffle($keys);
-        $tries = 0;
-        foreach ($models as $model) {
-            foreach (array_slice($keys, 0, 3) as $key) {
-                if (++$tries > 4) {
-                    return null;
-                }
-                $tick();
-                $r = Http::postJson(
-                    'https://generativelanguage.googleapis.com/v1beta/models/' . $model . ':generateContent',
-                    [
-                        'contents'         => [['role' => 'user', 'parts' => [['text' => 'Generate an image: ' . $prompt]]]],
-                        'generationConfig' => ['responseModalities' => ['TEXT', 'IMAGE']],
-                    ],
-                    ['x-goog-api-key: ' . $key],
-                    90
-                );
-                foreach ((array) ($r['data']['candidates'][0]['content']['parts'] ?? []) as $part) {
-                    $b64 = $part['inlineData']['data'] ?? $part['inline_data']['data'] ?? null;
-                    $raw = is_string($b64) ? base64_decode($b64, true) : false;
-                    if ($raw !== false && $raw !== '' && @getimagesizefromstring($raw) !== false) {
-                        return $raw;
-                    }
-                }
-                logWarn('image', "gemini {$model} failed (HTTP {$r['code']}): " . mb_substr((string) ($r['data']['error']['message'] ?? $r['data']['candidates'][0]['finishReason'] ?? $r['raw']), 0, 160));
-                if ($r['code'] === 404) {
-                    break; // این مدل وجود نداره؛ برو سراغ مدل بعدی
-                }
+        $tick();
+        $model = (string) App::cfg('cloudflare_image_model', '@cf/black-forest-labs/flux-1-schnell');
+        $steps = max(1, min(8, (int) App::cfg('cloudflare_image_steps', 4)));
+        $r = Http::postJson(
+            "https://api.cloudflare.com/client/v4/accounts/{$account}/ai/run/{$model}",
+            ['prompt' => mb_substr($prompt, 0, 2000), 'steps' => $steps],
+            ['Authorization: Bearer ' . $token],
+            90
+        );
+        $b64 = (string) ($r['data']['result']['image'] ?? '');
+        if ($r['code'] === 200 && $b64 !== '') {
+            $bytes = base64_decode($b64, true);
+            if (is_string($bytes) && $bytes !== '' && @getimagesizefromstring($bytes) !== false) {
+                return $bytes;
             }
+        }
+        $err = (string) ($r['data']['errors'][0]['message'] ?? '');
+        logWarn('image', "cloudflare failed (HTTP {$r['code']}): " . mb_substr($err !== '' ? $err : (string) $r['raw'], 0, 160));
+        if (in_array($r['code'], [400, 422], true) && $err !== '') {
+            self::$notice = $err;
         }
         return null;
     }
 
+    private static function useTopTools(): bool
+    {
+        $model = (string) App::cfg('image_toptools_model', 'top-tools-ai');
+        return strcasecmp(AI::route(), 'toptools:' . $model) === 0;
+    }
+
     public static function generate(string $prompt, callable $tick): ?string
     {
-        $bytes = self::gemini($prompt, $tick) ?? self::topTools($prompt, $tick);
+        // ترتیب: تاپ‌تولز (فقط وقتی مدل فعال پنل همون باشه) ← کلادفلر Flux ← Pollinations
+        self::$notice = null;
+        if (self::useTopTools()) {
+            $bytes = self::topTools($prompt, $tick);
+            if ($bytes !== null) {
+                return $bytes;
+            }
+            if (self::$notice !== null) {
+                return null;
+            }
+        }
+        $bytes = self::cloudflare($prompt, $tick);
         if ($bytes !== null) {
             return $bytes;
+        }
+        if (self::$notice !== null) {
+            return null;
         }
         $size  = (int) App::cfg('image_size', 1024);
         $key   = trim((string) App::cfg('pollinations_api_key', ''));
@@ -124,6 +149,9 @@ final class ImageGen
             $bytes = self::fetch($base . rawurlencode($prompt) . '?' . $query, $i === 1 ? $key : '', $tick);
             if ($bytes !== null) {
                 return $bytes;
+            }
+            if (self::$notice !== null) {
+                return null;
             }
         }
         return null;
@@ -167,6 +195,15 @@ final class ImageGen
 
         if ($code !== 200 || !is_string($raw) || $raw === '' || @getimagesizefromstring($raw) === false) {
             logWarn('image', "generation failed (HTTP {$code})");
+            if (in_array($code, [400, 422], true) && is_string($raw) && $raw !== '') {
+                $j   = json_decode($raw, true);
+                $msg = is_array($j)
+                    ? (string) ($j['error']['message'] ?? $j['message'] ?? (is_string($j['error'] ?? null) ? $j['error'] : ''))
+                    : trim(strip_tags($raw));
+                if ($msg !== '') {
+                    self::$notice = $msg;
+                }
+            }
             return null;
         }
         return $raw;
@@ -207,12 +244,6 @@ final class ImageGen
             $tg->reply($msg, '😕 الان نتونستم درخواستت رو بفهمم؛' . "\n" . 'یه‌کم دیگه دوباره بگو.');
             return;
         }
-        if ($plan['status'] === 'refuse') {
-            self::clear($chatId, null, $statusId);
-            $tg->reply($msg, '🙅 این یکی رو نمی‌کشم؛' . "\n" . 'یه چیز دیگه بگو 😅');
-            return;
-        }
-
         self::draw($msg, $plan['prompt'], $plan['caption'] ?? null, null, $statusId);
     }
 
@@ -227,7 +258,7 @@ final class ImageGen
         $bytes = self::generate($prompt, static fn() => $tg->action($chatId, 'upload_photo'));
         if ($bytes === null) {
             self::clear($chatId, $live, $statusId);
-            $tg->reply($msg, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
+            $tg->reply($msg, self::failText());
             return false;
         }
         $captions = ['🎨 بفرما، اینم عکست!', '🖼 اینم از این، امیدوارم خوشت بیاد!', '✨ تازه از زیر قلمم دراومده!'];

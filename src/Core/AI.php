@@ -666,16 +666,12 @@ final class AI
                 'PROMPT: <detailed English prompt: subject, setting, style, lighting, composition; max 70 words; keep names/on-image text as written>',
                 'CAPTION: <one short, friendly Persian sentence (max 12 words), at most one emoji, no markdown>',
                 'If no subject is given, invent a striking creative one. Never ask questions.',
-                'If the request is sexually explicit or extreme gore, reply exactly: REFUSE',
             ])],
             ['role' => 'user', 'content' => $request],
         ], ['tier' => 'lite', 'temperature' => 0.5, 'max_tokens' => 600, 'thinking' => null, 'section' => 'image']);
 
         if ($text === null) {
             return null;
-        }
-        if (preg_match('/^\s*REFUSE\b/i', $text)) {
-            return ['status' => 'refuse'];
         }
         if (!preg_match('/PROMPT\s*:\s*(.+)/iu', $text, $pm)) {
             return null;

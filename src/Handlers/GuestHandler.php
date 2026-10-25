@@ -99,7 +99,8 @@ final class GuestHandler
         self::edit($imid, null, LiveReply::DRAWING);
         $bytes = ImageGen::generate($prompt, static function () {});
         if ($bytes === null) {
-            self::edit($imid, $qid, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
+            $why = ImageGen::notice();
+            self::edit($imid, $qid, $why !== null ? '😕 ' . h(mb_substr($why, 0, 400)) : "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
             return;
         }
         if ($imid === null) {

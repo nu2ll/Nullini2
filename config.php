@@ -59,9 +59,11 @@ return [
 
     'image_model'          => env('IMAGE_MODEL', 'flux'),
     'image_size'           => 1024,
-    'image_gemini'         => env('IMAGE_GEMINI', '1') !== '0',
-    'image_gemini_models'  => envList('GEMINI_IMAGE_MODELS', ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']),
     'image_toptools_model' => env('TOPTOOLS_IMAGE_MODEL', 'top-tools-ai'),
+    'cloudflare_account_id' => env('CF_ACCOUNT_ID', ''),
+    'cloudflare_api_token'  => env('CF_API_TOKEN', ''),
+    'cloudflare_image_model' => env('CF_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell'),
+    'cloudflare_image_steps' => (int) env('CF_IMAGE_STEPS', 4),
     'pollinations_api_key' => env('POLLINATIONS_KEY', ''),
 
     'funstat_url'   => env('FUNSTAT_URL', ''),
