@@ -296,7 +296,7 @@ $body = new ReflectionMethod($live, 'body');
 check('live hold reaction', $body->invoke($live, '[[reaction | 🔥]]', false), null);
 check('live strip reaction', $body->invoke($live, "[[reaction | 🔥]]\n\nسلام، خوبی؟", false), 'سلام، خوبی؟');
 check('live persian first', $body->invoke($live, 'سلام', false), 'سلام');
-check('live image hidden', $body->invoke($live, "[[reaction | 🎨]]\n[[image | a cat in space]]", false), false);
+check('live image drawing', $body->invoke($live, "[[reaction | 🎨]]\n[[image | a cat in space]]", false), LiveReply::DRAWING);
 check('live action hidden', $body->invoke($live, "[[reaction | 👍]]\n[[weather | Tehran]]", false), false);
 check('live hold english', $body->invoke($live, "[[reaction | 👍]]\nACT", false), null);
 check('live hold command word', $body->invoke($live, "[[reaction | 👍]]\nACTION", false), null);
