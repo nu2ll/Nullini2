@@ -34,9 +34,15 @@ return [
         ],
         'free_order'  => [
             'groq' => envList('GROQ_MODELS'),
+            'toptools' => envList('TOPTOOLS_MODELS', ['claude-opus-5', 'gpt-5.6-sol', 'DeepSeek-V4-Flash-Vision-Exp']),
+            'tokenharbor' => envList('TOKENHARBOR_MODELS', ['deepseek-v4.1-flash:free', 'mimo-v2.6-flash:free']),
+            'apinex' => envList('APINEX_MODELS', ['free/gpt-6-luna', 'free/deepseek-v4.1-flash', 'free/gemini-3.8-flash', 'free/minimax-m3']),
         ],
         'free_keys'   => [
             'groq'       => envList('GROQ_KEYS'),
+            'toptools'   => envList('TOPTOOLS_KEYS'),
+            'tokenharbor' => envList('TOKENHARBOR_KEYS'),
+            'apinex'     => envList('APINEX_KEYS'),
         ],
     ],
     'storage_chat' => env('STORAGE_CHAT_ID', ''),

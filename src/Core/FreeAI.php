@@ -4,6 +4,9 @@ final class FreeAI
 {
     public const PROVIDERS = [
         'groq'       => ['name' => 'Groq', 'url' => 'https://api.groq.com/openai/v1'],
+        'toptools'   => ['name' => 'Top Tools', 'url' => 'https://top-tools-ai.com/api/v1'],
+        'tokenharbor' => ['name' => 'Token Harbor', 'url' => 'https://tokenharbor.ai/v1'],
+        'apinex'     => ['name' => 'APInex', 'url' => 'https://api.apinex.bond/v1'],
     ];
 
     private const SKIP = '/embed|whisper|tts|guard|moderat|rerank|orpheus|playai|transcri|speech|diffusion|flux|ocr|safety|reward|retriev|parakeet|canary/i';
