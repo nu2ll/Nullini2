@@ -34,14 +34,18 @@ return [
         ],
         'free_order'  => [
             'groq' => envList('GROQ_MODELS'),
-            'toptools' => envList('TOPTOOLS_MODELS', ['claude-opus-5', 'gpt-5.6-sol', 'DeepSeek-V4-Flash-Vision-Exp']),
-            'tokenharbor' => envList('TOKENHARBOR_MODELS', ['deepseek-v4.1-flash:free', 'mimo-v2.6-flash:free']),
-            'apinex' => envList('APINEX_MODELS', ['free/gpt-6-luna', 'free/deepseek-v4.1-flash', 'free/gemini-3.8-flash', 'free/minimax-m3']),
+            'apinex' => envList('APINEX_MODELS', [
+                'free/gpt-6-luna', 'free/deepseek-v4.1-flash', 'free/gemini-3.8-flash', 'free/deepseek-v4-pro-0813',
+                'free/glm-5.3', 'free/glm-5.3-flash', 'free/glm-5.3-flashx', 'free/muse-spark-1.3',
+                'free/minimax-m3.1-flash', 'free/mimo-v2.6-pro', 'free/jev-1.13',
+            ]),
+        ],
+        'free_skip'   => [
+            'toptools' => envList('TOPTOOLS_SKIP', ['claude-opus-5', 'gpt-5.6-sol', 'DeepSeek-V4-Flash-Vision-Exp']),
         ],
         'free_keys'   => [
             'groq'       => envList('GROQ_KEYS'),
             'toptools'   => envList('TOPTOOLS_KEYS'),
-            'tokenharbor' => envList('TOKENHARBOR_KEYS'),
             'apinex'     => envList('APINEX_KEYS'),
         ],
     ],
@@ -52,6 +56,7 @@ return [
 
     'image_model'          => env('IMAGE_MODEL', 'flux'),
     'image_size'           => 1024,
+    'image_toptools_model' => env('TOPTOOLS_IMAGE_MODEL', 'top-tools-ai'),
     'pollinations_api_key' => env('POLLINATIONS_KEY', ''),
 
     'funstat_url'   => env('FUNSTAT_URL', ''),

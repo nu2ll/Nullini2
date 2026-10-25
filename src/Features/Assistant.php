@@ -172,10 +172,15 @@ final class Assistant
             $res = AI::reply($content, ['no_action' => true] + $ctx, $history, $opt);
         }
 
-        if (!empty($res['image'])) {
-            $live?->discard();
+        if (!empty($res['image']) || !empty($res['image_partial'])) {
             Users::hit('image');
-            if (ImageGen::draw($msg, $res['image']) && !$service) {
+            $caption = null;
+            if (!empty($res['image_partial'])) {
+                $plan = AI::imagePrompt($question !== '' ? $question : (string) ($msg['text'] ?? ''));
+                $res['image'] = $plan['prompt'] ?? (AI::googleTranslate($question, 'English') ?? $question);
+                $caption      = $plan['caption'] ?? null;
+            }
+            if (ImageGen::draw($msg, $res['image'], $caption, $live) && !$service) {
                 self::remember($chatId, $userId, $log, '[یه عکس براش ساختم: ' . mb_substr($res['image'], 0, 200) . ']');
             }
             return;

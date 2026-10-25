@@ -414,7 +414,7 @@ final class AI
         }
 
         if (($ctx['chat_type'] ?? '') !== 'inline') {
-            $l[] = 'تو می‌تونی عکس بسازی. اگه منظور کاربر واقعاً ساختن یه تصویر جدید بود، به‌جای جواب فقط یک خط بنویس: «IMAGE: <توصیف کامل تصویر به انگلیسی: سوژه، فضا، سبک، نور؛ حداکثر ۷۰ کلمه>» و هیچ چیز دیگه‌ای ننویس. اگه فقط درباره‌ی یه عکس سؤال کرد، عکس نساز. محتوای جنسی یا خشونت شدید نکش.';
+            $l[] = 'تو می‌تونی عکس بسازی. اگه منظور کاربر واقعاً ساختن یه تصویر جدید بود، به‌جای جواب فقط یک خط بنویس: «[[image | <توصیف کامل تصویر به انگلیسی: سوژه، فضا، سبک، نور؛ حداکثر ۷۰ کلمه>]]» و هیچ چیز دیگه‌ای ننویس. اگه فقط درباره‌ی یه عکس سؤال کرد، عکس نساز. محتوای جنسی یا خشونت شدید نکش.';
         }
 
         if (!in_array($ctx['chat_type'] ?? '', ['inline', 'miniapp'], true) && empty($ctx['no_action'])) {
@@ -422,7 +422,7 @@ final class AI
         }
 
         if ($withReaction) {
-            $l[] = (self::isGroqRoute() ? 'خط اول جوابت همیشه و حتماً با کلمه‌ی REACTION و دونقطه شروع بشه: «REACTION: <ایموجی>»، متناسب با پیام، فقط یکی از این لیست (بیرون از لیست قبول نیست): ' : 'خط اول جوابت دقیقاً «REACTION: <ایموجی>» باشه، متناسب با پیام، فقط از این لیست: ') . implode(' ', self::REACTIONS) . '. بعد یه خط خالی و بعد جواب اصلی. درباره‌ی این خط چیزی نگو.';
+            $l[] = 'خط اول جوابت همیشه و حتماً به شکل «[[reaction | <ایموجی>]]» باشه، متناسب با پیام، فقط یکی از این لیست (بیرون از لیست قبول نیست): ' . implode(' ', self::REACTIONS) . '. بعد یه خط خالی و بعد جواب اصلی. درباره‌ی این خط چیزی نگو.';
         }
 
         return implode("\n", $l);
@@ -458,19 +458,18 @@ final class AI
             return $out;
         }
 
-        if (self::isGroqRoute()) {
-            [$out['reaction'], $text] = self::splitReaction($text, $withReaction);
-        } else {
-            $parts = preg_split('/\r?\n/', $text, 2);
-            if (preg_match('/^\s*reaction\s*:?\s*(.*)$/iu', $parts[0] ?? '', $m)) {
-                $out['reaction'] = self::matchReaction($m[1]);
-                $text            = ltrim($parts[1] ?? '');
-            }
-        }
+        [$out['reaction'], $text] = self::splitReaction($text, $withReaction);
 
-        if (($ctx['chat_type'] ?? '') !== 'inline' && preg_match('/^\s*IMAGE\s*:\s*(.+)$/isu', $text, $im)) {
-            $out['image'] = mb_substr(mbTrim($im[1], " \t\n\"'«»"), 0, 700);
+        if (($ctx['chat_type'] ?? '') !== 'inline' && preg_match('/^\s*\[\[\s*image\s*[|｜:：]?\s*(.*)$/isu', $text, $im)) {
+            $closed = (bool) preg_match('/\]\]/u', $im[1]);
+            $prompt = preg_replace('/\]\].*$/su', '', $im[1]) ?? $im[1];
+            $out['image'] = mb_substr(mbTrim($prompt, " \t\n\"'«»[]"), 0, 700);
+            // استریم وسط تگ قطع شده (مثل «[[image | A hyper-real») → پرامپت ناقصه
+            $out['image_partial'] = !$closed && mb_strlen($out['image']) < 40;
             return $out;
+        }
+        if (preg_match('/^\s*\[\[\s*(image|reaction)\b/iu', $text)) {
+            return $out; // تگ خام هیچ‌وقت به‌عنوان جواب نمایش داده نشه
         }
 
         if (!in_array($ctx['chat_type'] ?? '', ['inline', 'miniapp'], true) && empty($ctx['no_action']) && ($act = Intent::parse($text)) !== null) {
@@ -517,26 +516,32 @@ final class AI
         return null;
     }
 
-    public static function isGroqRoute(): bool
+    /** خط فقط ایموجی (مثل «😘») بدون هیچ حرف و عددی؟ */
+    public static function isEmojiLine(string $line): bool
     {
-        return str_starts_with(self::route(), 'groq');
+        $line = trim($line);
+        return $line !== ''
+            && preg_match('/^[\s\p{So}\p{Sk}\x{200D}\x{FE0F}\x{20E3}\x{1F3FB}-\x{1F3FF}]{1,24}$/u', $line) === 1
+            && preg_match('/[\p{So}]/u', $line) === 1;
     }
 
-    public static function splitReaction(string $text, bool $bare): array
+    /**
+     * $bare = true: بعضی مدل‌ها به‌جای «[[reaction | 😘]]» فقط یه ایموجی تو خط اول می‌نویسن
+     * و بعدش جواب رو؛ اون ایموجی هم به‌عنوان ری‌اکشن حساب می‌شه (فقط وقتی بعدش متنی باشه).
+     */
+    public static function splitReaction(string $text, bool $bare = false): array
     {
         $text  = ltrim($text);
         $parts = preg_split('/\r?\n/', $text, 2) ?: [$text];
         $first = trim((string) preg_replace('/[*_`\[\]()<>"«»]/u', '', $parts[0] ?? ''));
         $rest  = ltrim($parts[1] ?? '');
 
-        if (preg_match('/^reaction\b\s*([:：=\-–]?)\s*(\S*)\s*(.*)$/iu', $first, $m) && ($m[1] !== '' || !preg_match('/[\p{L}\p{N}]/u', $m[2]))) {
-            return [self::matchReaction($m[2], true), trim($m[3] . "\n" . $rest)];
+        if ($bare && $rest !== '' && self::isEmojiLine($first)) {
+            return [self::matchReaction($first, true), $rest];
         }
-        if ($bare && $rest !== '' && $first !== '' && mb_strlen($first) <= 14 && !preg_match('/[\p{L}\p{N}]/u', $first)) {
-            $e = self::matchReaction($first, true);
-            if ($e !== null) {
-                return [$e, $rest];
-            }
+
+        if (preg_match('/^reaction\b\s*([|｜]?)\s*(\S*)\s*(.*)$/iu', $first, $m) && ($m[1] !== '' || !preg_match('/[\p{L}\p{N}]/u', $m[2]))) {
+            return [self::matchReaction($m[2], true), trim($m[3] . "\n" . $rest)];
         }
         return [null, $text];
     }
