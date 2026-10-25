@@ -96,7 +96,7 @@ final class GuestHandler
 
     public static function image(?string $imid, ?string $qid, string $prompt): void
     {
-        self::edit($imid, null, LiveReply::DRAWING);
+        self::edit($imid, null, '🎨 دارم می‌کشمش، چند لحظه صبر کن...');
         $url = ImageGen::warmUrl($prompt, static function () {});
         if ($url === null) {
             self::edit($imid, $qid, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");

@@ -6,7 +6,7 @@
  */
 final class LiveReply
 {
-    public const DRAWING = '🎨 دارم می‌کشمش، چند لحظه صبر کن...';
+    private const COMMANDS = ['IMAGE'];
 
     private array $ids    = [];
     private array $sent   = [];
@@ -59,11 +59,6 @@ final class LiveReply
         return false;
     }
 
-    public function active(): bool
-    {
-        return $this->ids !== [];
-    }
-
     public function discard(): void
     {
         foreach ($this->ids as $id) {
@@ -87,11 +82,16 @@ final class LiveReply
         $nl = strpos($t, "\n");
         if ($this->reaction) {
             if ($nl === false) {
-                if (!$final && (preg_match('/^[\s*`«»\[]*reaction(?![A-Za-z])/iu', $t))) {
+                if (!$final && (preg_match('/^[\s*`«»]*reaction(?![A-Za-z])/iu', $t) || (AI::isGroqRoute() && mb_strlen($t) <= 14 && !preg_match('/[\p{L}\p{N}]/u', $t)))) {
                     return null;
                 }
+            } elseif (AI::isGroqRoute()) {
+                $t = AI::splitReaction($t, true)[1];
             } else {
-                $t = AI::splitReaction($t)[1];
+                $parts = preg_split('/\r?\n/', $t, 2) ?: [$t];
+                if (preg_match('/^\s*reaction\s*:?\s*(.*)$/iu', $parts[0])) {
+                    $t = ltrim($parts[1] ?? '');
+                }
             }
         }
 
@@ -100,9 +100,6 @@ final class LiveReply
             return null;
         }
 
-        if (preg_match('/^\s*\[\[\s*image(?![A-Za-z])/iu', $t)) {
-            return self::DRAWING;
-        }
         if (preg_match('/^\s*\[\[\s*(' . implode('|', Intent::NAMES) . ')(?![A-Za-z])/iu', $t)) {
             return false;
         }
@@ -113,6 +110,9 @@ final class LiveReply
         if (preg_match('/^[\s*`«»]*([A-Za-z]+)(.*)$/su', $t, $w)) {
             if (!$final && trim($w[2]) === '') {
                 return null;
+            }
+            if (preg_match('/^[\s*`«»]*(' . implode('|', self::COMMANDS) . ')\s*[:：]/iu', $t)) {
+                return false;
             }
         }
         return $t;

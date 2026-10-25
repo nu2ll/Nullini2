@@ -414,7 +414,7 @@ final class AI
         }
 
         if (($ctx['chat_type'] ?? '') !== 'inline') {
-            $l[] = 'تو می‌تونی عکس بسازی. اگه منظور کاربر واقعاً ساختن یه تصویر جدید بود، به‌جای جواب فقط یک خط بنویس: «[[image | <توصیف کامل تصویر به انگلیسی: سوژه، فضا، سبک، نور؛ حداکثر ۷۰ کلمه>]]» و هیچ چیز دیگه‌ای ننویس. اگه فقط درباره‌ی یه عکس سؤال کرد، عکس نساز. محتوای جنسی یا خشونت شدید نکش.';
+            $l[] = 'تو می‌تونی عکس بسازی. اگه منظور کاربر واقعاً ساختن یه تصویر جدید بود، به‌جای جواب فقط یک خط بنویس: «IMAGE: <توصیف کامل تصویر به انگلیسی: سوژه، فضا، سبک، نور؛ حداکثر ۷۰ کلمه>» و هیچ چیز دیگه‌ای ننویس. اگه فقط درباره‌ی یه عکس سؤال کرد، عکس نساز. محتوای جنسی یا خشونت شدید نکش.';
         }
 
         if (!in_array($ctx['chat_type'] ?? '', ['inline', 'miniapp'], true) && empty($ctx['no_action'])) {
@@ -422,7 +422,7 @@ final class AI
         }
 
         if ($withReaction) {
-            $l[] = 'خط اول جوابت همیشه و حتماً به شکل «[[reaction | <ایموجی>]]» باشه، متناسب با پیام، فقط یکی از این لیست (بیرون از لیست قبول نیست): ' . implode(' ', self::REACTIONS) . '. بعد یه خط خالی و بعد جواب اصلی. درباره‌ی این خط چیزی نگو.';
+            $l[] = (self::isGroqRoute() ? 'خط اول جوابت همیشه و حتماً با کلمه‌ی REACTION و دونقطه شروع بشه: «REACTION: <ایموجی>»، متناسب با پیام، فقط یکی از این لیست (بیرون از لیست قبول نیست): ' : 'خط اول جوابت دقیقاً «REACTION: <ایموجی>» باشه، متناسب با پیام، فقط از این لیست: ') . implode(' ', self::REACTIONS) . '. بعد یه خط خالی و بعد جواب اصلی. درباره‌ی این خط چیزی نگو.';
         }
 
         return implode("\n", $l);
@@ -458,9 +458,17 @@ final class AI
             return $out;
         }
 
-        [$out['reaction'], $text] = self::splitReaction($text);
+        if (self::isGroqRoute()) {
+            [$out['reaction'], $text] = self::splitReaction($text, $withReaction);
+        } else {
+            $parts = preg_split('/\r?\n/', $text, 2);
+            if (preg_match('/^\s*reaction\s*:?\s*(.*)$/iu', $parts[0] ?? '', $m)) {
+                $out['reaction'] = self::matchReaction($m[1]);
+                $text            = ltrim($parts[1] ?? '');
+            }
+        }
 
-        if (($ctx['chat_type'] ?? '') !== 'inline' && preg_match('/^\s*\[\[\s*image\s*[|｜:：]\s*(.+?)\s*\]\]/isu', $text, $im)) {
+        if (($ctx['chat_type'] ?? '') !== 'inline' && preg_match('/^\s*IMAGE\s*:\s*(.+)$/isu', $text, $im)) {
             $out['image'] = mb_substr(mbTrim($im[1], " \t\n\"'«»"), 0, 700);
             return $out;
         }
@@ -509,15 +517,26 @@ final class AI
         return null;
     }
 
-    public static function splitReaction(string $text): array
+    public static function isGroqRoute(): bool
+    {
+        return str_starts_with(self::route(), 'groq');
+    }
+
+    public static function splitReaction(string $text, bool $bare): array
     {
         $text  = ltrim($text);
         $parts = preg_split('/\r?\n/', $text, 2) ?: [$text];
         $first = trim((string) preg_replace('/[*_`\[\]()<>"«»]/u', '', $parts[0] ?? ''));
         $rest  = ltrim($parts[1] ?? '');
 
-        if (preg_match('/^reaction\b\s*([|｜]?)\s*(\S*)\s*(.*)$/iu', $first, $m) && ($m[1] !== '' || !preg_match('/[\p{L}\p{N}]/u', $m[2]))) {
+        if (preg_match('/^reaction\b\s*([:：=\-–]?)\s*(\S*)\s*(.*)$/iu', $first, $m) && ($m[1] !== '' || !preg_match('/[\p{L}\p{N}]/u', $m[2]))) {
             return [self::matchReaction($m[2], true), trim($m[3] . "\n" . $rest)];
+        }
+        if ($bare && $rest !== '' && $first !== '' && mb_strlen($first) <= 14 && !preg_match('/[\p{L}\p{N}]/u', $first)) {
+            $e = self::matchReaction($first, true);
+            if ($e !== null) {
+                return [$e, $rest];
+            }
         }
         return [null, $text];
     }
