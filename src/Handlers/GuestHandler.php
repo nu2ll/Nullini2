@@ -99,8 +99,7 @@ final class GuestHandler
         self::edit($imid, null, LiveReply::DRAWING);
         $bytes = ImageGen::generate($prompt, static function () {});
         if ($bytes === null) {
-            $why = ImageGen::notice();
-            self::edit($imid, $qid, $why !== null ? '😕 ' . h(mb_substr($why, 0, 400)) : "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
+            self::edit($imid, $qid, ImageGen::failText());
             return;
         }
         if ($imid === null) {
@@ -108,11 +107,6 @@ final class GuestHandler
         }
         // عکس موقتاً به چت ذخیره فرستاده و بلافاصله پاک می‌شه؛ فقط file_id می‌مونه
         $media = ImageGen::fileId($bytes);
-        $url   = null;
-        if ($media === null) {
-            $url   = ImageGen::warmUrl($prompt, static function () {});
-            $media = $url;
-        }
         if ($media === null) {
             self::edit($imid, $qid, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");
             return;
@@ -122,13 +116,7 @@ final class GuestHandler
             'inline_message_id' => $imid,
             'media'             => ['type' => 'photo', 'media' => $media, 'caption' => '🎨 بفرما، اینم عکست!', 'parse_mode' => 'HTML'],
         ], 60);
-        if (empty($r['ok']) && $url !== null) {
-            $tg->call('editMessageText', [
-                'inline_message_id'    => $imid,
-                'text'                 => '🎨 بفرما، اینم عکست!',
-                'link_preview_options' => ['url' => $url, 'prefer_large_media' => true, 'show_above_text' => true],
-            ], 30);
-        } elseif (empty($r['ok'])) {
+        if (empty($r['ok'])) {
             self::edit($imid, $qid, '😕 عکس ساخته شد ولی ارسالش به مشکل خورد؛' . "\n" . 'دوباره امتحان کن.');
         }
     }

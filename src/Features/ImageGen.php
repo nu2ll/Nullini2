@@ -2,41 +2,27 @@
 
 final class ImageGen
 {
-    private static ?string $notice = null;
+    private static ?string $notice  = null;
+    private static ?string $failMsg  = null;
+    private static bool    $quotaOut = false;
 
     public static function notice(): ?string
     {
         return self::$notice;
     }
 
-    private static function failText(): string
+    public static function failText(): string
     {
-        return self::$notice !== null
-            ? '😕 ' . h(mb_substr(self::$notice, 0, 400))
-            : "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.";
-    }
-
-    private const ENDPOINTS = [
-        'https://image.pollinations.ai/prompt/',
-        'https://gen.pollinations.ai/image/',
-    ];
-
-    public static function url(string $prompt, int $seed): string
-    {
-        $size = (int) App::cfg('image_size', 1024);
-        return self::ENDPOINTS[0] . rawurlencode($prompt) . '?' . http_build_query([
-            'width'  => $size,
-            'height' => $size,
-            'seed'   => $seed,
-            'nologo' => 'true',
-            'model'  => App::cfg('image_model', 'flux'),
-        ]);
-    }
-
-    public static function warmUrl(string $prompt, callable $tick): ?string
-    {
-        $url = self::url($prompt, random_int(1, 2000000));
-        return self::fetch($url, '', $tick) !== null ? $url : null;
+        if (self::$failMsg !== null) {
+            return self::$failMsg;
+        }
+        if (self::$notice !== null) {
+            return '😕 ' . h(mb_substr(self::$notice, 0, 400));
+        }
+        if (self::$quotaOut) {
+            return "😕 سهمیه‌ی ساخت عکس برای امروز تموم شده؛\nفردا دوباره امتحان کن.";
+        }
+        return "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.";
     }
 
     public static function fileId(string $bytes): ?string
@@ -98,10 +84,14 @@ final class ImageGen
                 return $bytes;
             }
         }
-        $err = (string) ($r['data']['errors'][0]['message'] ?? '');
-        logWarn('image', "cloudflare failed (HTTP {$r['code']}): " . mb_substr($err !== '' ? $err : (string) $r['raw'], 0, 160));
-        if (in_array($r['code'], [400, 422], true) && $err !== '') {
-            self::$notice = $err;
+        $err  = (string) ($r['data']['errors'][0]['message'] ?? '');
+        $ecode = (int) ($r['data']['errors'][0]['code'] ?? 0);
+        logWarn('image', "cloudflare failed (HTTP {$r['code']}, code {$ecode}): " . mb_substr($err !== '' ? $err : (string) $r['raw'], 0, 160));
+        if ($ecode === 3036 || ($r['code'] === 429 && stripos($err, 'allocation') !== false)) {
+            self::$quotaOut = true;
+        } elseif ($ecode === 3030 || preg_match('/nsfw|safety|inappropriate|moderat/i', $err)) {
+            self::$notice  = $err;
+            self::$failMsg = "😕 سرویس عکس به این درخواست گیر داد؛\nیه‌کم جمله‌ت رو عوض کن و دوباره بنویس.";
         }
         return null;
     }
@@ -114,8 +104,10 @@ final class ImageGen
 
     public static function generate(string $prompt, callable $tick): ?string
     {
-        // ترتیب: تاپ‌تولز (فقط وقتی مدل فعال پنل همون باشه) ← کلادفلر Flux ← Pollinations
-        self::$notice = null;
+        // ترتیب: تاپ‌تولز (فقط وقتی مدل فعال پنل همون باشه) ← کلادفلر Flux
+        self::$notice   = null;
+        self::$failMsg  = null;
+        self::$quotaOut = false;
         if (self::useTopTools()) {
             $bytes = self::topTools($prompt, $tick);
             if ($bytes !== null) {
@@ -125,36 +117,7 @@ final class ImageGen
                 return null;
             }
         }
-        $bytes = self::cloudflare($prompt, $tick);
-        if ($bytes !== null) {
-            return $bytes;
-        }
-        if (self::$notice !== null) {
-            return null;
-        }
-        $size  = (int) App::cfg('image_size', 1024);
-        $key   = trim((string) App::cfg('pollinations_api_key', ''));
-        $query = http_build_query([
-            'width'  => $size,
-            'height' => $size,
-            'seed'   => random_int(1, 2000000),
-            'nologo' => 'true',
-            'model'  => App::cfg('image_model', 'flux'),
-        ]);
-
-        foreach (self::ENDPOINTS as $i => $base) {
-            if ($i === 1 && $key === '') {
-                continue;
-            }
-            $bytes = self::fetch($base . rawurlencode($prompt) . '?' . $query, $i === 1 ? $key : '', $tick);
-            if ($bytes !== null) {
-                return $bytes;
-            }
-            if (self::$notice !== null) {
-                return null;
-            }
-        }
-        return null;
+        return self::cloudflare($prompt, $tick);
     }
 
     private static function fetch(string $url, string $key, callable $tick): ?string
