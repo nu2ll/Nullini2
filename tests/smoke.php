@@ -112,6 +112,7 @@ check('bare emoji alias', AI::splitReaction("😂\nخنده‌دار بود", tr
 check('bare emoji off when disabled', AI::splitReaction("😘\n\nسلام", false), [null, "😘\n\nسلام"]);
 check('bare emoji alone kept as text', AI::splitReaction('😘', true), [null, '😘']);
 check('emoji + text same line kept', AI::splitReaction("😘 سلام\nخوبی", true), [null, "😘 سلام\nخوبی"]);
+check('react colon', AI::splitReaction("reaction: 😘\nسلام"), ['😘', 'سلام']);
 check('isEmojiLine', [AI::isEmojiLine('😘'), AI::isEmojiLine('❤‍🔥'), AI::isEmojiLine('hi 😘'), AI::isEmojiLine('')], [true, true, false, false]);
 $panel = AiPanel::providerKeyboard('gemini', 0)['inline_keyboard'];
 check('panel auto first', $panel[0][0]['callback_data'], 'ai:set:gemini:a:0');

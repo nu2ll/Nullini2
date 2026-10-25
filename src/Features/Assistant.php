@@ -10,7 +10,9 @@ final class Assistant
     public static function history(int $chatId, int $userId): array
     {
         $m = Store::get('ai_memory', self::memKey($chatId, $userId));
-        return is_array($m) && ($m['day'] ?? '') === date('Y-m-d') ? ($m['messages'] ?? []) : [];
+        $msgs = is_array($m) && ($m['day'] ?? '') === date('Y-m-d') ? ($m['messages'] ?? []) : [];
+        // قالب قدیمی «[یه عکس براش ساختم: ...]» از حافظه حذف می‌شه
+        return array_values(array_filter($msgs, static fn($x) => !str_contains((string) ($x['content'] ?? ''), 'یه عکس براش ساختم')));
     }
 
     private static function remember(int $chatId, int $userId, string $user, string $assistant): void
@@ -181,7 +183,7 @@ final class Assistant
                 $caption      = $plan['caption'] ?? null;
             }
             if (ImageGen::draw($msg, $res['image'], $caption, $live) && !$service) {
-                self::remember($chatId, $userId, $log, '[یه عکس براش ساختم: ' . mb_substr($res['image'], 0, 200) . ']');
+                self::remember($chatId, $userId, $log, '[[image | ' . mb_substr($res['image'], 0, 200) . ']]');
             }
             return;
         }

@@ -40,6 +40,9 @@ return [
                 'free/minimax-m3.1-flash', 'free/mimo-v2.6-pro', 'free/jev-1.13',
             ]),
         ],
+        'free_only'   => [
+            'apinex' => true, // فقط مدل‌های لیست free_order (رایگان‌ها)؛ مدل‌های پولی استفاده نشن
+        ],
         'free_skip'   => [
             'toptools' => envList('TOPTOOLS_SKIP', ['claude-opus-5', 'gpt-5.6-sol', 'DeepSeek-V4-Flash-Vision-Exp']),
         ],

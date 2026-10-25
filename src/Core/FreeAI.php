@@ -39,7 +39,12 @@ final class FreeAI
             return [];
         }
         $list = Store::remember('ai', 'models_' . $prov, 21600, static fn() => self::fetch($prov));
-        return is_array($list) ? $list : [];
+        $list = is_array($list) ? $list : [];
+        if (!empty(App::cfg('ai', [])['free_only'][$prov])) {
+            $only = array_map('strval', (array) (App::cfg('ai', [])['free_order'][$prov] ?? []));
+            $list = array_values(array_filter($list, static fn($e) => in_array($e['id'] ?? '', $only, true)));
+        }
+        return $list;
     }
 
     public static function title(string $prov, string $model): string

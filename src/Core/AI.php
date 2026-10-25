@@ -540,7 +540,7 @@ final class AI
             return [self::matchReaction($first, true), $rest];
         }
 
-        if (preg_match('/^reaction\b\s*([|｜]?)\s*(\S*)\s*(.*)$/iu', $first, $m) && ($m[1] !== '' || !preg_match('/[\p{L}\p{N}]/u', $m[2]))) {
+        if (preg_match('/^reaction\b\s*([|｜:：]?)\s*(\S*)\s*(.*)$/iu', $first, $m) && ($m[1] !== '' || !preg_match('/[\p{L}\p{N}]/u', $m[2]))) {
             return [self::matchReaction($m[2], true), trim($m[3] . "\n" . $rest)];
         }
         return [null, $text];
