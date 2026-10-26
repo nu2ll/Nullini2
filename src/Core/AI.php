@@ -144,9 +144,43 @@ final class AI
         return self::route() === 'gemini';
     }
 
+    public static function routerOn(): bool
+    {
+        return (bool) Store::get('cfg', 'router_on', true);
+    }
+
+    public static function setRouterOn(bool $on): void
+    {
+        Store::set('cfg', 'router_on', $on);
+    }
+
+    /** مدلِ انتخاب‌شده‌ی مخصوص روتر؛ رشته‌ی خالی = همون مدلِ فعالِ چت */
+    public static function routerSetting(): string
+    {
+        $v = (string) Store::get('cfg', 'router_route', '');
+        return $v !== '' && self::validRoute($v) ? $v : '';
+    }
+
+    public static function setRouterRoute(string $route): void
+    {
+        if ($route === '' || self::validRoute($route)) {
+            Store::set('cfg', 'router_route', $route);
+        }
+    }
+
+    public static function routerRoute(): string
+    {
+        $r = self::routerSetting();
+        return $r !== '' ? $r : self::route();
+    }
+
     public static function chat(array $messages, array $opt = []): ?string
     {
-        $route = self::route();
+        return self::chatVia(self::route(), $messages, $opt);
+    }
+
+    public static function chatVia(string $route, array $messages, array $opt = []): ?string
+    {
         if ($route !== 'gemini' && !str_starts_with($route, 'gemini:')) {
             $messages = self::audioToText($messages, explode(':', $route, 2)[0], $opt['deadline'] ?? null);
             return $messages === null ? null : FreeAI::chat($route, $messages, $opt);
@@ -418,6 +452,10 @@ final class AI
             $l[] = 'الان در حالت اینلاین جواب می‌دی؛ جوابت مستقیم وسط یه چت فرستاده می‌شه، پس کامل و مستقل باشه.';
         }
 
+        if (($ctx['chat_type'] ?? '') !== 'inline') {
+            $l[] = 'تو می‌تونی عکس بسازی. اگه منظور کاربر واقعاً ساختن یه تصویر جدید بود، به‌جای جواب فقط یک خط بنویس: «[[image | <توصیف کامل تصویر به انگلیسی: سوژه، فضا، سبک، نور؛ حداکثر ۷۰ کلمه>]]» و هیچ چیز دیگه‌ای ننویس. اگه فقط درباره‌ی یه عکس سؤال کرد، عکس نساز. محتوای جنسی یا خشونت شدید نکش.';
+        }
+
         if ($withReaction) {
             $l[] = 'خط اول جوابت همیشه و حتماً به شکل «[[reaction | <ایموجی>]]» باشه، متناسب با پیام، فقط یکی از این لیست (بیرون از لیست قبول نیست): ' . implode(' ', self::REACTIONS) . '. بعد یه خط خالی و بعد جواب اصلی. درباره‌ی این خط چیزی نگو.';
         }
@@ -449,13 +487,21 @@ final class AI
             $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
         }
 
-        $out = ['answer' => null, 'reaction' => null];
+        $out = ['answer' => null, 'reaction' => null, 'image' => null];
         if ($text === null) {
             return $out;
         }
 
         [$out['reaction'], $text] = self::splitReaction($text, $withReaction);
 
+        if (($ctx['chat_type'] ?? '') !== 'inline' && preg_match('/^\s*\[\[\s*image\s*[|｜:：]?\s*(.*)$/isu', $text, $im)) {
+            $closed = (bool) preg_match('/\]\]/u', $im[1]);
+            $prompt = preg_replace('/\]\].*$/su', '', $im[1]) ?? $im[1];
+            $out['image'] = mb_substr(mbTrim($prompt, " \t\n\"'«»[]"), 0, 700);
+            // استریم وسط تگ قطع شده (مثل «[[image | A hyper-real») → پرامپت ناقصه
+            $out['image_partial'] = !$closed && mb_strlen($out['image']) < 40;
+            return $out;
+        }
         if (preg_match('/^\s*\[\[\s*(image|reaction)\b/iu', $text)) {
             return $out; // تگ خام هیچ‌وقت به‌عنوان جواب نمایش داده نشه
         }

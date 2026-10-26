@@ -318,9 +318,6 @@ check('intent translate keeps lines', Intent::interpret('{"tool":"translate","ar
 check('intent evidence not in message', Intent::interpret('{"tool":"wiki","arg":"Mourinho","evidence":"درباره‌ی مورینیو"}', 'اینو اصلا مال فنرباغچه هم نبود'), null);
 check('intent evidence missing', Intent::interpret('{"tool":"date","arg":"","evidence":""}', 'ساعت چنده'), null);
 check('intent evidence arabic letters', Intent::grounded('كجاست', 'کجاست؟'), true);
-check('intent image', Intent::interpret('{"tool":"image","arg":"گربه تو فضا","evidence":"عکس بساز"}', 'یه عکس بساز گربه تو فضا'), ['image', 'گربه تو فضا']);
-check('intent image no subject', Intent::interpret('{"tool":"image","arg":"","evidence":"بکش"}', 'یه چیز باحال بکش'), ['image', '']);
-check('intent image evidence not in message', Intent::interpret('{"tool":"image","arg":"cat","evidence":"عکس بساز"}', 'این عکس قشنگه'), null);
 check('intent none', Intent::interpret('{"tool":"none","arg":"","evidence":""}', 'سلام'), null);
 check('intent unknown tool', Intent::interpret('{"tool":"hack","arg":"","evidence":"سلام"}', 'سلام'), null);
 check('intent not json', Intent::interpret('سلام', 'سلام'), null);
@@ -337,12 +334,24 @@ $body = new ReflectionMethod($live, 'body');
 check('live hold reaction', $body->invoke($live, '[[reaction | 🔥]]', false), null);
 check('live strip reaction', $body->invoke($live, "[[reaction | 🔥]]\n\nسلام، خوبی؟", false), 'سلام، خوبی؟');
 check('live persian first', $body->invoke($live, 'سلام', false), 'سلام');
-check('live image tag hidden', $body->invoke($live, "[[reaction | 🎨]]\n[[image | a cat in space]]", false), false);
+check('live image drawing', $body->invoke($live, "[[reaction | 🎨]]\n[[image | a cat in space]]", false), LiveReply::DRAWING);
 check('live action hidden', $body->invoke($live, "[[reaction | 👍]]\n[[weather | Tehran]]", false), false);
 check('live hold english', $body->invoke($live, "[[reaction | 👍]]\nACT", false), null);
 check('live hold command word', $body->invoke($live, "[[reaction | 👍]]\nACTION", false), null);
 check('live english ok', $body->invoke($live, "[[reaction | 👍]]\nHello there, how can I help you today?", false), 'Hello there, how can I help you today?');
 check('live think hidden', $body->invoke($live, "<think>hmm", false), null);
+
+check('router on by default', AI::routerOn(), true);
+AI::setRouterOn(false);
+check('router off', AI::routerOn(), false);
+check('router off skips decide', Intent::decide('هوای تهران چطوره'), null);
+AI::setRouterOn(true);
+check('router follows chat model', AI::routerRoute(), AI::route());
+AI::setRouterRoute('gemini');
+check('router own model', AI::routerSetting(), 'gemini');
+AI::setRouterRoute('');
+check('router model reset', AI::routerSetting(), '');
+check('router bad model ignored', (function () { AI::setRouterRoute('nope:zzz'); return AI::routerSetting(); })(), '');
 
 @unlink($db);
 @unlink($db . '-wal');

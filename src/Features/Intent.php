@@ -2,7 +2,7 @@
 
 final class Intent
 {
-    public const NAMES = ['translate', 'download', 'wiki', 'search', 'weather', 'rates', 'font', 'qr', 'fal', 'password', 'date', 'coin', 'calc', 'nid', 'love', 'roast', 'userinfo', 'giveaway', 'aicheck', 'image'];
+    public const NAMES = ['translate', 'download', 'wiki', 'search', 'weather', 'rates', 'font', 'qr', 'fal', 'password', 'date', 'coin', 'calc', 'nid', 'love', 'roast', 'userinfo', 'giveaway', 'aicheck'];
 
     private const CATALOG = [
         'translate' => 'translate text. arg = "<target language in English, or auto> | <text to translate; empty if the sender means the replied-to message>"',
@@ -24,7 +24,6 @@ final class Intent
         'roast'     => 'roast one person. arg = me | reply | @username | numeric id; me is the sender, reply is the author of the replied-to message',
         'userinfo'  => 'show the sender\'s own Telegram account info. no arg',
         'aicheck'   => 'judge whether the attached or replied-to image is AI-generated. no arg',
-        'image'     => 'draw or generate a NEW picture from a description. arg = what to draw, in the sender\'s own words; empty if the sender named no subject. Editing or transforming an existing photo is not supported',
     ];
 
     private static function routerPrompt(): string
@@ -40,8 +39,7 @@ final class Intent
             '3. Never guess which data source a vague question probably wants. If the message itself does not say what kind of result is wanted, the answer is none.',
             '4. A remark aimed at the assistant\'s previous answer, or at what someone else said, is conversation.',
             '5. aicheck requires ATTACHED or REPLY_TO to be a photo and the sender to be asking whether that image is AI-generated or real.',
-            '6. image requires the sender to ask for a new picture to be created. Asking about, describing, rating or reacting to an existing picture is conversation, and so is asking to edit or redo an attached photo.',
-            '7. If no single tool clearly fits, the answer is none.',
+            '6. If no single tool clearly fits, the answer is none.',
             'Output exactly one JSON object and nothing else: {"tool":"<name or none>","arg":"<argument>","evidence":"<the exact words copied from CURRENT_MESSAGE in which the sender asks for this action>"}',
             'When nothing applies output {"tool":"none","arg":"","evidence":""}.',
             'Tools:',
@@ -52,7 +50,7 @@ final class Intent
     public static function decide(string $text, array $ctx = []): ?array
     {
         $text = trim($text);
-        if ($text === '') {
+        if ($text === '' || !AI::routerOn()) {
             return null;
         }
         $lines   = [];
@@ -71,7 +69,7 @@ final class Intent
         }
         $lines[] = 'RECENT: ' . ($recent ? "\n" . implode("\n", $recent) : 'none');
 
-        $raw = AI::chat([
+        $raw = AI::chatVia(AI::routerRoute(), [
             ['role' => 'system', 'content' => self::routerPrompt()],
             ['role' => 'user', 'content' => implode("\n", $lines)],
         ], [
@@ -134,10 +132,6 @@ final class Intent
         }
         if ($name === 'giveaway') {
             $private ? Giveaway::start($msg) : Giveaway::fromGroup($msg);
-            return true;
-        }
-        if ($name === 'image') {
-            ImageGen::handle($msg, $arg !== '' ? $arg : trim((string) ($msg['text'] ?? $msg['caption'] ?? '')));
             return true;
         }
         if (in_array($name, ['translate', 'rates', 'weather', 'wiki', 'search', 'love', 'roast', 'aicheck'], true)) {
