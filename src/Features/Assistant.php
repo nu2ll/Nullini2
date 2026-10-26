@@ -90,23 +90,67 @@ final class Assistant
         if (!$results) {
             return null;
         }
-        $lines = [];
-        foreach (array_slice($results, 0, 10) as $i => $result) {
+        // Tavily already ranks results; reinforce relevance and prefer distinct domains.
+        $ranked = [];
+        $queryTerms = array_values(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($query)) ?: [], static fn($w) => mb_strlen($w) > 1));
+        foreach ($results as $result) {
             if (!is_array($result)) {
                 continue;
             }
             $title = trim((string) ($result['title'] ?? ''));
             $content = trim((string) ($result['raw_content'] ?? $result['content'] ?? ''));
             $url = trim((string) ($result['url'] ?? ''));
-            if ($title === '' && $content === '') {
+            if (($title === '' && $content === '') || !filter_var($url, FILTER_VALIDATE_URL) || !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
                 continue;
             }
-            if (self::$webSource === null && $url !== '' && filter_var($url, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
-                self::$webSource = ['title' => ($title !== '' ? $title : (string) parse_url($url, PHP_URL_HOST)), 'url' => $url];
+            $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+            $host = preg_replace('/^www\./', '', $host) ?? $host;
+            $haystack = mb_strtolower($title . ' ' . mb_substr($content, 0, 1800) . ' ' . $host);
+            $matches = 0;
+            foreach ($queryTerms as $term) {
+                if (mb_strpos($haystack, $term) !== false) {
+                    $matches++;
+                }
             }
-            $lines[] = ($i + 1) . '. ' . $title . "\nمحتوا: " . mb_substr($content, 0, 3500);
+            $tavilyScore = (float) ($result['score'] ?? 0);
+            $overlap = count($queryTerms) ? $matches / count($queryTerms) : 0;
+            $ranked[] = [
+                'title' => $title !== '' ? $title : $host,
+                'content' => $content,
+                'url' => $url,
+                'host' => $host,
+                'score' => ($tavilyScore * 0.72) + ($overlap * 0.28),
+                'raw_score' => $tavilyScore,
+            ];
         }
-        return $lines ? implode("\n\n", $lines) : null;
+        usort($ranked, static fn($a, $b) => $b['score'] <=> $a['score']);
+        // Keep the strongest result per domain so one site cannot crowd out the others.
+        $unique = [];
+        $seenHosts = [];
+        foreach ($ranked as $item) {
+            if (isset($seenHosts[$item['host']])) {
+                continue;
+            }
+            $seenHosts[$item['host']] = true;
+            $unique[] = $item;
+            if (count($unique) >= 10) {
+                break;
+            }
+        }
+        if (!$unique) {
+            return null;
+        }
+        // Only cite the top-ranked relevant result, and only if it has meaningful relevance.
+        $best = $unique[0];
+        if ($best['raw_score'] < 0.15 && $best['score'] < 0.25) {
+            return null;
+        }
+        self::$webSource = ['title' => $best['title'], 'url' => $best['url']];
+        $lines = [];
+        foreach ($unique as $i => $result) {
+            $lines[] = ($i + 1) . '. عنوان: ' . $result['title'] . "\nدامنه: " . $result['host'] . "\nامتیاز ارتباط: " . number_format($result['score'], 2) . "\nمحتوا: " . mb_substr($result['content'], 0, 3500);
+        }
+        return implode("\n\n", $lines);
     }
 
     private static function memKey(int $chatId, int $userId): string
@@ -430,15 +474,29 @@ final class Assistant
         usleep((int) ($seconds * 1_000_000));
     }
 
-    private static function send(array $msg, string $answer): void
+    private static function send(array $msg, string $answer, ?array $source = null): void
     {
         $tg = App::tg();
-        foreach (AI::chunks($answer) as $part) {
-            $r = $tg->reply($msg, AI::toHtml($part));
+        $parts = AI::chunks($answer);
+        $lastIndex = count($parts) - 1;
+        foreach ($parts as $i => $part) {
+            $html = AI::toHtml($part);
+            if ($i === $lastIndex && $source !== null && !empty($source['url']) && !empty($source['title'])) {
+                $url = (string) $source['url'];
+                if (filter_var($url, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+                    $html .= "\n\n🔎 <b>منبع:</b> <a href=\"" . h($url) . "\">" . h((string) $source['title']) . "</a>";
+                }
+            }
+            $r = $tg->reply($msg, $html);
             if (empty($r['ok'])) {
+                // Safe plain-text fallback: Telegram auto-links the single source URL.
+                $plain = $part;
+                if ($i === $lastIndex && $source !== null && !empty($source['url'])) {
+                    $plain .= "\n\nمنبع: " . (string) ($source['title'] ?? 'منبع') . ' — ' . (string) $source['url'];
+                }
                 $tg->call('sendMessage', [
                     'chat_id'          => $msg['chat']['id'],
-                    'text'             => mb_substr($part, 0, 4096),
+                    'text'             => mb_substr($plain, 0, 4096),
                     'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
                 ]);
             }
@@ -565,20 +623,19 @@ final class Assistant
         }
 
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
+        $source = null;
         if (isset($ctx['web_search_context'])) {
-            $answer = preg_replace('~https?://\S+|www\.\S+~iu', '', $answer) ?? $answer;
+            $answer = preg_replace('~https?://[^\s<>]+|www\.[^\s<>]+~iu', '', $answer) ?? $answer;
             $answer = preg_replace('/[ \t]+([,،؛.!؟])/u', '$1', $answer) ?? $answer;
             $answer = trim(preg_replace('/\n{3,}/u', "\n\n", $answer) ?? $answer);
-            if (self::$webSource !== null) {
-                $sourceTitle = h((string) self::$webSource['title']);
-                $sourceUrl = h((string) self::$webSource['url']);
-                $answer .= "\n\n🔎 <b>منبع:</b> <a href=\"{$sourceUrl}\">{$sourceTitle}</a>";
-            }
+            $source = self::$webSource;
+            // Avoid streaming a partial answer before the final source link can be attached.
+            $live = null;
         }
 
         if (!$live || !$live->finish($answer)) {
             self::typing($chatId, $answer);
-            self::send($msg, $answer);
+            self::send($msg, $answer, $source);
         }
 
         if ($res['answer'] !== null && !$service) {
