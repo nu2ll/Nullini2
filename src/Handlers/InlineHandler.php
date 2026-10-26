@@ -168,7 +168,7 @@ final class InlineHandler
         }
         $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
         $live = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
-        $opt  = ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res  = AI::reply($q, $ctx, [], $opt);
         if (!empty($res['action'])) {
             [$act, $arg] = $res['action'];
@@ -207,7 +207,7 @@ final class InlineHandler
     {
         if ($kind === 'ai') {
             $live   = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
-            $res    = AI::reply($q, ['user_name' => $name, 'chat_type' => 'inline'], [], ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []));
+            $res    = AI::reply($q, ['user_name' => $name, 'chat_type' => 'inline'], [], ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []));
             $answer = $res['answer'] ?? AI::FAIL_TEXT;
             $text   = self::aiHead($q) . AI::toHtml(AI::fit($answer, self::aiHead($q)));
         } else {

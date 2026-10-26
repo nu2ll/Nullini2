@@ -98,7 +98,7 @@ final class Giveaway
         $out = AI::chat([
             ['role' => 'system', 'content' => 'Read the user\'s giveaway request (any language or phrasing) and reply with JSON only: {"prize": "<the prize exactly as the user wrote it, without the winner count or the time>", "winners": <number of winners, 1 if not said>, "minutes": <minutes until the draw, 0 if not said>}'],
             ['role' => 'user', 'content' => $q],
-        ], ['tier' => 'lite', 'temperature' => 0, 'max_tokens' => 200, 'thinking' => null, 'deadline' => microtime(true) + 12]);
+        ], ['tier' => 'lite', 'temperature' => 0, 'thinking' => null, 'deadline' => microtime(true) + 12]);
         $j     = $out !== null && preg_match('/\{.*\}/s', $out, $m) ? json_decode($m[0], true) : null;
         $prize = is_array($j) ? mbTrim((string) ($j['prize'] ?? '')) : '';
         $win   = is_array($j) ? (int) ($j['winners'] ?? 1) : 1;

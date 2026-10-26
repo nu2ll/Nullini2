@@ -38,7 +38,7 @@ final class MessageHandler
             return;
         }
 
-        $hasMedia = isset($msg['voice']) || isset($msg['audio']) || isset($msg['photo']);
+        $hasMedia = Assistant::hasMedia($msg);
         if ($text === '' && !$hasMedia) {
             return;
         }
@@ -172,6 +172,13 @@ final class MessageHandler
                     $tg->reply($msg, Ui::guide('image'));
                 } else {
                     ImageGen::handle($msg, $args);
+                }
+                return true;
+
+            case 'isai':
+                $tg->action($chatId, 'typing');
+                foreach (AiDetect::pages(AiDetect::report($msg)) as $part) {
+                    $tg->reply($msg, $part);
                 }
                 return true;
 

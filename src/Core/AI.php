@@ -187,8 +187,7 @@ final class AI
         $base = [
             'contents'         => $contents,
             'generationConfig' => [
-                'temperature'     => $opt['temperature'] ?? 0.7,
-                'maxOutputTokens' => (int) ($opt['max_tokens'] ?? 2000) + 3000,
+                'temperature' => $opt['temperature'] ?? 0.7,
             ],
             'safetySettings'   => array_map(static fn($c) => ['category' => $c, 'threshold' => 'BLOCK_ONLY_HIGH'], self::SAFETY),
         ];
@@ -405,6 +404,12 @@ final class AI
             if (!empty($ctx['chat_title'])) {
                 $l[] = "داخل گروه «{$ctx['chat_title']}» هستی" . (!empty($ctx['chat_bio']) ? " (بیو: {$ctx['chat_bio']})" : '') . '؛ لحنت همون‌قدر خودمونی بمونه.';
             }
+            if (!empty($ctx['user_role'])) {
+                $l[] = "جایگاه مخاطب تو این گروه «{$ctx['user_role']}» است (مالک گروه یعنی سازنده‌ی گروه، ادمین یعنی مدیر، ممبر یعنی عضو عادی)؛ فقط اگه به جوابت ربط داشت ازش استفاده کن.";
+            }
+            if (!empty($ctx['reply_role'])) {
+                $l[] = "جایگاه کسی که مخاطب روی پیامش ریپلای کرده تو این گروه «{$ctx['reply_role']}» است؛ فقط اگه به جوابت ربط داشت ازش استفاده کن.";
+            }
         } elseif (($ctx['chat_type'] ?? '') === 'guest') {
             $l[] = 'تو یه چت تگت کردن که عضوش نیستی (حالت مهمان)؛ فقط همین پیام (و پیامی که روش ریپلای شده) رو می‌بینی. جوابت کامل و مستقل باشه.';
         } elseif (($ctx['chat_type'] ?? '') === 'miniapp') {
@@ -443,14 +448,13 @@ final class AI
         $text     = self::chat($messages, [
             'tier'        => $opt['tier'] ?? 'smart',
             'temperature' => 0.7,
-            'max_tokens'  => $opt['max_tokens'] ?? 2000,
             'deadline'    => $deadline,
             'section'     => 'chat',
             'stream'      => $opt['on_text'] ?? null,
         ]);
         if ($text === null && ($opt['tier'] ?? 'smart') === 'smart' && self::hasTiers() && $deadline - microtime(true) > 5) {
             logWarn('ai', 'smart chain failed, retrying on lite');
-            $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'max_tokens' => $opt['max_tokens'] ?? 2000, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
+            $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
         }
 
         $out = ['answer' => null, 'reaction' => null, 'image' => null, 'action' => null];
@@ -620,12 +624,12 @@ final class AI
             ['role' => 'system', 'content' => "You are a professional translator. {$rule} Output ONLY the translation, no notes, no quotes."],
             ['role' => 'user', 'content' => $text],
         ];
-        $out = self::chat($msgs, ['tier' => 'lite', 'temperature' => 0.2, 'max_tokens' => 1500, 'deadline' => min($deadline, microtime(true) + 18), 'thinking' => null, 'section' => 'translate']);
+        $out = self::chat($msgs, ['tier' => 'lite', 'temperature' => 0.2, 'deadline' => min($deadline, microtime(true) + 18), 'thinking' => null, 'section' => 'translate']);
         if ($out === null || trim($out) === '') {
             $out = self::googleTranslate($text, $target);
         }
         if (($out === null || trim($out) === '') && self::hasTiers() && $deadline - microtime(true) > 8) {
-            $out = self::chat($msgs, ['tier' => 'smart', 'temperature' => 0.2, 'max_tokens' => 1500, 'deadline' => $deadline, 'section' => 'translate']);
+            $out = self::chat($msgs, ['tier' => 'smart', 'temperature' => 0.2, 'deadline' => $deadline, 'section' => 'translate']);
         }
         return $out !== null && trim($out) !== '' ? $out : null;
     }
@@ -668,7 +672,7 @@ final class AI
                 'If no subject is given, invent a striking creative one. Never ask questions.',
             ])],
             ['role' => 'user', 'content' => $request],
-        ], ['tier' => 'lite', 'temperature' => 0.5, 'max_tokens' => 600, 'thinking' => null, 'section' => 'image']);
+        ], ['tier' => 'lite', 'temperature' => 0.5, 'thinking' => null, 'section' => 'image']);
 
         if ($text === null) {
             return null;
@@ -696,6 +700,6 @@ final class AI
         return self::chat([['role' => 'user', 'content' => [
             ['type' => 'media', 'mime' => $mime, 'data' => base64_encode($bytes)],
             ['type' => 'text', 'text' => 'Transcribe this audio exactly, in its original language. Output only the transcript.'],
-        ]]], ['tier' => 'lite', 'temperature' => 0, 'max_tokens' => 2000, 'thinking' => null, 'section' => 'voice']);
+        ]]], ['tier' => 'lite', 'temperature' => 0, 'thinking' => null, 'section' => 'voice']);
     }
 }

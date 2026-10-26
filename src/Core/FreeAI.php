@@ -291,7 +291,6 @@ final class FreeAI
             'model'       => $model,
             'messages'    => $msgs,
             'temperature' => $opt['temperature'] ?? 0.7,
-            'max_tokens'  => (int) ($opt['max_tokens'] ?? 2000) + 2000,
         ];
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
         $cap      = $prov === 'groq' ? 10 : (int) ($opt['per_try'] ?? 45);

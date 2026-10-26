@@ -196,6 +196,7 @@ final class Ui
         'download'  => '📥 دانلودر',
         'giveaway'  => '🎁 قرعه‌کشی',
         'wiki'      => '📖 ویکی‌پدیا',
+        'aicheck'   => '🕵️ تشخیص عکس AI',
         'whisper'   => '🤫 نجوا',
         'weather'   => '🌦 آب‌وهوا',
         'calc'      => '🧮 محاسبه سریع',
@@ -364,13 +365,23 @@ final class Ui
                 . "• پست‌های کانال متصل رو خودکار جواب می‌دم\n\n"
                 . "💡 اگه جواب ندادم،\n"
                 . "منو ادمین گروه کن تا پیام‌ها به دستم برسه.",
+            'aicheck' => "<b>🕵️ تشخیص عکس هوش مصنوعی</b>\n"
+                . "بفهم یه عکس واقعیه یا با هوش مصنوعی ساخته شده.\n\n"
+                . "• عکس رو بفرست و زیرش بنویس:\n<code>/isai</code>\n"
+                . "• یا روی یه عکس ریپلای کن و بنویس:\n<code>/isai</code>\n"
+                . "• یا عادی بپرس:\n<code>نالینی این عکس AI هست؟</code>\n\n"
+                . "💡 تلگرام متادیتای عکس‌ها رو پاک می‌کنه؛\n"
+                . "برای بررسی دقیق‌تر عکس رو به‌صورت «فایل»\n"
+                . "(Send as File) بفرست.\n\n"
+                . "⚠️ جواب فقط یه برآورده و ۱۰۰٪ قطعی نیست.",
+
             default => "<b>📘 راهنما</b>",
         };
     }
 
     private const HELP_LAYOUT = [
         1 => [['ai', 'image'], ['translate', 'search'], ['whisper'], ['font', 'download'], ['giveaway', 'wiki']],
-        2 => [['weather', 'calc'], ['qr', 'love'], ['group'], ['roast', 'nid'], ['funstat', 'games']],
+        2 => [['weather', 'calc'], ['qr', 'love'], ['group'], ['roast', 'nid'], ['funstat', 'games'], ['aicheck']],
     ];
 
     public static function helpPage(string $key): int
@@ -426,7 +437,7 @@ final class Ui
             $try = btn('🎁 بساز', 'gw:new', 'primary');
         }
         return ikb([
-            [$try],
+            $key === 'aicheck' ? [] : [$try],
             [btn('🔙 راهنما', self::helpPage($key) === 2 ? 'help:p2' : 'help:menu', null)],
         ]);
     }

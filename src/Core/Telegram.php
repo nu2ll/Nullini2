@@ -52,6 +52,7 @@ final class Telegram
             }
         }
 
+        $tries = 0;
         while (true) {
             $ch = $this->handle();
             curl_setopt_array($ch, [
@@ -66,6 +67,9 @@ final class Telegram
                 logWarn('tg', "{$method}: network error: " . curl_error($ch));
                 curl_close($ch);
                 $this->ch = null;
+                if (++$tries >= 10) {
+                    return null;
+                }
                 usleep(400000);
                 continue;
             }
@@ -80,6 +84,9 @@ final class Telegram
                 $desc = (string) ($data['description'] ?? '');
 
                 if ($code === 429) {
+                    if (++$tries >= 10) {
+                        return $data;
+                    }
                     $wait = (int) ($data['parameters']['retry_after'] ?? 1);
                     sleep(max(1, $wait));
                     continue;

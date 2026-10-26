@@ -339,7 +339,7 @@ final class Downloader
             $pick = AI::chat([
                 ['role' => 'system', 'content' => 'Pick the YouTube result that is the original studio recording of the requested track. Reply with its number only.'],
                 ['role' => 'user', 'content' => "Track: {$q}" . ($dur > 0 ? " ({$dur}s)" : '') . "\n" . implode("\n", $lines)],
-            ], ['tier' => 'lite', 'temperature' => 0, 'max_tokens' => 20, 'thinking' => null, 'deadline' => microtime(true) + 10]);
+            ], ['tier' => 'lite', 'temperature' => 0, 'thinking' => null, 'deadline' => microtime(true) + 10]);
             $n = $pick !== null && preg_match('/\d+/', $pick, $pm) ? (int) $pm[0] - 1 : -1;
             if (!isset($list[$n])) {
                 usort($list, static fn($a, $b) => ($dur > 0 && $a['d'] > 0 ? abs($a['d'] - $dur) : 999) <=> ($dur > 0 && $b['d'] > 0 ? abs($b['d'] - $dur) : 999));

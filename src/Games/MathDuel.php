@@ -4,7 +4,7 @@ final class MathDuel
 {
     private const P           = 'math';
     public const GAME_SECONDS = 120;
-    public const Q_SECONDS    = 7;
+    public const Q_SECONDS    = 6;
     private const BOT_KEY     = 'bot';
     private const BOT_CORRECT = 60;
     private const ACTIVE_KEY  = '_active_math';

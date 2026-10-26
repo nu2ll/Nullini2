@@ -200,10 +200,10 @@ final class Roast
         $sys    = 'تو «نالینی» هستی. فقط متن روست رو بنویس، بدون مقدمه و بدون ** یا #.';
         $stream = $live ? ['stream' => $live->feed(...)] : [];
         $out    = AI::chat([['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => array_values(array_filter([$pic, ['type' => 'text', 'text' => $prompt]]))]],
-            ['tier' => 'smart', 'temperature' => 1.0, 'max_tokens' => 2000, 'deadline' => microtime(true) + 60, 'section' => 'roast'] + $stream);
+            ['tier' => 'smart', 'temperature' => 1.0, 'deadline' => microtime(true) + 60, 'section' => 'roast'] + $stream);
         if ($out === null) {
             $out = AI::chat([['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => str_replace('این عکس، عکس پروفایل تلگرامشه.', 'عکس پروفایل داره.', $prompt)]],
-                ['tier' => 'lite', 'temperature' => 1.0, 'max_tokens' => 2000, 'thinking' => null, 'section' => 'roast'] + $stream);
+                ['tier' => 'lite', 'temperature' => 1.0, 'thinking' => null, 'section' => 'roast'] + $stream);
         }
         if ($out === null) {
             return AI::FAIL_TEXT;

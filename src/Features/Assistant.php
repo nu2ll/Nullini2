@@ -2,6 +2,27 @@
 
 final class Assistant
 {
+    private const TAGS = [
+        'title'         => 'عنوان',
+        'artist'        => 'خواننده',
+        'album'         => 'آلبوم',
+        'album_artist'  => 'خواننده آلبوم',
+        'date'          => 'تاریخ ساخت آهنگ',
+        'year'          => 'سال',
+        'originaldate'  => 'تاریخ انتشار اصلی',
+        'genre'         => 'ژانر',
+        'track'         => 'شماره ترک',
+        'disc'          => 'شماره دیسک',
+        'composer'      => 'آهنگساز',
+        'lyricist'      => 'ترانه‌سرا',
+        'comment'       => 'توضیحات',
+        'copyright'     => 'کپی‌رایت',
+        'publisher'     => 'ناشر',
+        'language'      => 'زبان',
+        'lyrics'        => 'متن آهنگ',
+        'creation_time' => 'زمان ساخت فایل',
+    ];
+
     private static function memKey(int $chatId, int $userId): string
     {
         return "{$chatId}_{$userId}";
@@ -27,6 +48,26 @@ final class Assistant
         });
     }
 
+    private static function role(int $chatId, int $userId): ?string
+    {
+        $r = App::tg()->call('getChatMember', ['chat_id' => $chatId, 'user_id' => $userId], 8);
+        $m = $r['result'] ?? null;
+        if (empty($r['ok']) || !is_array($m)) {
+            return null;
+        }
+        $role = match ($m['status'] ?? '') {
+            'creator'       => 'مالک گروه',
+            'administrator' => 'ادمین',
+            'restricted', 'member' => 'ممبر',
+            default         => '',
+        };
+        if ($role === '') {
+            return null;
+        }
+        $tag = trim((string) ($m['custom_title'] ?? $m['tag'] ?? ''));
+        return $role . ($tag !== '' ? " (تگ: {$tag})" : '');
+    }
+
     private static function chatInfo(int $chatId): array
     {
         return Store::remember('cache', 'gchat_' . $chatId, 3600, static function () use ($chatId) {
@@ -39,18 +80,202 @@ final class Assistant
     {
         $photos = $msg['photo'] ?? [];
         if (!$photos) {
-            return null;
+            return self::frameId($msg);
         }
         $best = end($photos);
         return $best['file_id'] ?? null;
     }
 
+    public static function frameId(array $msg): ?string
+    {
+        $s = $msg['sticker'] ?? null;
+        if (is_array($s) && empty($s['is_animated']) && empty($s['is_video'])) {
+            return $s['file_id'] ?? null;
+        }
+        $m = $s ?? $msg['animation'] ?? $msg['video'] ?? $msg['video_note'] ?? null;
+        $t = is_array($m) ? ($m['thumbnail'] ?? $m['thumb'] ?? null) : null;
+        return is_array($t) ? ($t['file_id'] ?? null) : null;
+    }
+
+    /** true وقتی فقط یه فریم (تامبنیل) از پیام به هوش مصنوعی می‌رسه: استیکر متحرک/ویدیویی، گیف، ویدیو، ویدیونوت */
+    public static function isFrame(array $m): bool
+    {
+        if (isset($m['photo'])) {
+            return false;
+        }
+        $s = $m['sticker'] ?? null;
+        if (is_array($s)) {
+            return (!empty($s['is_animated']) || !empty($s['is_video'])) && self::frameId($m) !== null;
+        }
+        return (isset($m['animation']) || isset($m['video']) || isset($m['video_note'])) && self::frameId($m) !== null;
+    }
+
+    /** نوت‌های «[کاربر ...]» که پیام بخشی از یه آلبوم چندتاییه (media_group_id) */
+    public static function withAlbum(string $note, array $m): string
+    {
+        if (empty($m['media_group_id']) || !str_starts_with($note, '[کاربر') || !str_ends_with($note, ']')) {
+            return $note;
+        }
+        return substr($note, 0, -1) . '؛ این بخشی از یه آلبوم چندتاییه و فقط همین یکی پیوست شده]';
+    }
+
+    public static function fileInfo(array $m): ?string
+    {
+        $a = $m['audio'] ?? (empty($m['animation']) ? ($m['document'] ?? null) : null);
+        if (!is_array($a)) {
+            return null;
+        }
+        $name  = (string) ($a['file_name'] ?? '');
+        $ext   = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        if ($ext === '') {
+            $ext = strtolower(ltrim((string) strrchr((string) ($a['mime_type'] ?? ''), '/'), '/'));
+        }
+        $music = isset($m['audio']) || str_starts_with((string) ($a['mime_type'] ?? ''), 'audio/');
+        $size  = (int) ($a['file_size'] ?? 0);
+        $f     = ['نوع: ' . ($music ? 'آهنگ' : 'فایل') . ($ext !== '' ? " ({$ext})" : '')];
+        if ($name !== '') {
+            $f[] = 'نام: ' . $name;
+        }
+        if ($music) {
+            $f = array_merge($f, self::musicInfo($a));
+        }
+        if ($size > 0) {
+            $f[] = 'حجم: ' . ($size >= 1048576 ? round($size / 1048576, 1) . ' مگابایت' : max(1, (int) round($size / 1024)) . ' کیلوبایت');
+        }
+        return implode(' | ', $f);
+    }
+
+    public static function dataInfo(array $m): ?array
+    {
+        if (is_array($m['poll'] ?? null)) {
+            $p = $m['poll'];
+            $o = [];
+            foreach ((array) ($p['options'] ?? []) as $i => $opt) {
+                $o[] = ($i + 1) . ') ' . ($opt['text'] ?? '') . (isset($opt['voter_count']) ? ' (' . $opt['voter_count'] . ' رأی)' : '');
+            }
+            $quiz = ($p['type'] ?? '') === 'quiz';
+            $f    = ['سؤال: ' . ($p['question'] ?? ''), 'گزینه‌ها: ' . implode('، ', $o)];
+            if (isset($p['total_voter_count'])) {
+                $f[] = 'مجموع رأی: ' . $p['total_voter_count'];
+            }
+            $f[] = !empty($p['is_anonymous']) ? 'ناشناس' : 'عمومی';
+            if (!empty($p['allows_multiple_answers'])) {
+                $f[] = 'چندجوابی';
+            }
+            if (!empty($p['is_closed'])) {
+                $f[] = 'بسته‌شده';
+            }
+            if ($quiz && isset($p['correct_option_id'])) {
+                $f[] = 'جواب درست: گزینه‌ی ' . ((int) $p['correct_option_id'] + 1);
+            }
+            if (!empty($p['explanation'])) {
+                $f[] = 'توضیح: ' . $p['explanation'];
+            }
+            return [$quiz ? 'آزمون' : 'نظرسنجی', implode(' | ', $f)];
+        }
+        $v = is_array($m['venue'] ?? null) ? $m['venue'] : null;
+        $l = $v['location'] ?? $m['location'] ?? null;
+        if (!is_array($l) || !isset($l['latitude'], $l['longitude'])) {
+            return null;
+        }
+        $f = [];
+        if (!empty($v['title'])) {
+            $f[] = 'نام: ' . $v['title'];
+        }
+        if (!empty($v['address'])) {
+            $f[] = 'آدرس: ' . $v['address'];
+        }
+        $f[] = 'عرض جغرافیایی: ' . $l['latitude'];
+        $f[] = 'طول جغرافیایی: ' . $l['longitude'];
+        if (!empty($l['live_period'])) {
+            $f[] = 'لوکیشن زنده برای ' . intdiv((int) $l['live_period'], 60) . ' دقیقه';
+        }
+        if (($place = self::placeName((float) $l['latitude'], (float) $l['longitude'])) !== '') {
+            $f[] = 'آدرس تقریبی روی نقشه: ' . $place;
+        }
+        return [$v ? 'مکان' : 'لوکیشن', implode(' | ', $f)];
+    }
+
+    private static function placeName(float $lat, float $lon): string
+    {
+        $j = Http::getJson('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&accept-language=fa&lat=' . $lat . '&lon=' . $lon, ['User-Agent: NulliniBot'], 8);
+        return is_array($j) && !empty($j['display_name']) ? (string) $j['display_name'] : '';
+    }
+
+    private static function musicInfo(array $a): array
+    {
+        $j   = [];
+        $fid = (string) ($a['file_id'] ?? '');
+        if ($fid !== '' && (int) ($a['file_size'] ?? 0) <= 20_000_000 && ($bytes = App::tg()->download($fid)) !== null && ($tmp = tempnam(sys_get_temp_dir(), 'nl_au_')) !== false) {
+            try {
+                if (file_put_contents($tmp, $bytes) !== false) {
+                    $o = [];
+                    @exec('timeout 20 ffprobe -v error -print_format json -show_format -show_streams ' . escapeshellarg($tmp) . ' 2>/dev/null', $o);
+                    $j = json_decode(implode('', $o), true) ?: [];
+                }
+            } finally {
+                @unlink($tmp);
+            }
+        }
+        $src    = [(array) ($j['format']['tags'] ?? [])];
+        $stream = [];
+        foreach ((array) ($j['streams'] ?? []) as $st) {
+            if (($st['codec_type'] ?? '') === 'audio') {
+                $stream = $stream ?: $st;
+                $src[]  = (array) ($st['tags'] ?? []);
+            }
+        }
+        $tags = [];
+        foreach ($src as $t) {
+            foreach ($t as $k => $v) {
+                $k = strtolower((string) $k);
+                $v = trim(preg_replace('/\s+/u', ' ', (string) $v) ?? '');
+                if ($v !== '' && !isset($tags[$k])) {
+                    $tags[$k] = $v;
+                }
+            }
+        }
+        if (!isset($tags['title']) && !empty($a['title'])) {
+            $tags['title'] = (string) $a['title'];
+        }
+        if (!isset($tags['artist']) && !empty($a['performer'])) {
+            $tags['artist'] = (string) $a['performer'];
+        }
+        $f = [];
+        foreach (array_slice($tags, 0, 40, true) as $k => $v) {
+            $f[] = (self::TAGS[$k] ?? $k) . ': ' . mb_substr($v, 0, 300);
+        }
+        $dur = (int) round((float) ($j['format']['duration'] ?? $a['duration'] ?? 0));
+        if ($dur > 0) {
+            $f[] = 'مدت: ' . intdiv($dur, 60) . ':' . sprintf('%02d', $dur % 60);
+        }
+        if (!empty($stream['codec_name'])) {
+            $f[] = 'کدک: ' . $stream['codec_name'];
+        }
+        $br = (int) ($j['format']['bit_rate'] ?? $stream['bit_rate'] ?? 0);
+        if ($br > 0) {
+            $f[] = 'بیت‌ریت: ' . (int) round($br / 1000) . ' kbps';
+        }
+        if (!empty($stream['sample_rate'])) {
+            $f[] = 'سمپل‌ریت: ' . $stream['sample_rate'] . ' Hz';
+        }
+        if (!empty($stream['channels'])) {
+            $f[] = 'کانال: ' . $stream['channels'];
+        }
+        return $f;
+    }
+
+    public static function hasMedia(array $m): bool
+    {
+        return isset($m['voice']) || isset($m['audio']) || isset($m['document']) || isset($m['poll']) || isset($m['venue']) || isset($m['location']) || isset($m['photo']) || isset($m['sticker']) || isset($m['animation']) || isset($m['video']) || isset($m['video_note']);
+    }
+
     public static function mediaPart(array $m): ?array
     {
         $tg = App::tg();
-        if (isset($m['voice']) || isset($m['audio'])) {
-            $a     = $m['voice'] ?? $m['audio'];
-            $bytes = ($a['file_size'] ?? 0) <= 15_000_000 ? $tg->download($a['file_id']) : null;
+        if (isset($m['voice'])) {
+            $a     = $m['voice'];
+            $bytes = ($a['file_size'] ?? 0) <= 20_000_000 ? $tg->download($a['file_id']) : null;
             return $bytes ? ['type' => 'media', 'mime' => $a['mime_type'] ?? 'audio/ogg', 'data' => base64_encode($bytes)] : null;
         }
         if ($fid = self::bestPhoto($m)) {
@@ -64,9 +289,21 @@ final class Assistant
         return null;
     }
 
-    private static function kind(array $m): string
+    public static function kind(array $m): string
     {
-        return (isset($m['voice']) || isset($m['audio'])) ? 'ویس' : (isset($m['photo']) ? 'عکس' : 'پیام');
+        return match (true) {
+            isset($m['voice'])                       => 'ویس',
+            isset($m['audio'])                       => 'آهنگ',
+            isset($m['photo'])                       => 'عکس',
+            isset($m['sticker'])                     => 'استیکر',
+            isset($m['animation'])                   => 'گیف',
+            isset($m['video']) || isset($m['video_note']) => 'ویدیو',
+            isset($m['document'])                    => 'فایل',
+            isset($m['poll'])                        => 'نظرسنجی',
+            isset($m['venue'])                       => 'مکان',
+            isset($m['location'])                    => 'لوکیشن',
+            default                                  => 'پیام',
+        };
     }
 
     private static function typing(int $chatId, string $answer): void
@@ -111,6 +348,14 @@ final class Assistant
             $info              = self::chatInfo($chatId);
             $ctx['chat_title'] = $info['title'];
             $ctx['chat_bio']   = mb_substr((string) $info['bio'], 0, 300);
+            if (!$service && $userId) {
+                $ctx['user_role'] = self::role($chatId, $userId);
+            }
+            $rf = $msg['reply_to_message']['from'] ?? null;
+            $rid = (int) ($rf['id'] ?? 0);
+            if ($rid && empty($rf['is_bot']) && empty($msg['reply_to_message']['sender_chat']) && empty($msg['reply_to_message']['is_automatic_forward'])) {
+                $ctx['reply_role'] = $rid === $userId && isset($ctx['user_role']) ? $ctx['user_role'] : self::role($chatId, $rid);
+            }
         }
 
         $parts = [];
@@ -118,30 +363,50 @@ final class Assistant
         $log   = $question;
 
         $reply = $msg['reply_to_message'] ?? null;
+        $n0    = count($notes);
         if ($reply) {
             $rt = trim((string) ($reply['text'] ?? $reply['caption'] ?? ''));
             if ($media = self::mediaPart($reply)) {
                 $parts[] = $media;
-                $notes[] = '[کاربر روی یه ' . self::kind($reply) . ' ریپلای کرده که پیوست شده' . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
+                $notes[] = '[کاربر روی یه ' . self::kind($reply) . ' ریپلای کرده که پیوست شده' . (self::isFrame($reply) ? '؛ فقط عکسِ فریم اولش پیوسته' : '') . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
+            } elseif ($info = self::fileInfo($reply)) {
+                $notes[] = "[کاربر روی یه فایل ریپلای کرده؛ {$info}" . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
+            } elseif ($data = self::dataInfo($reply)) {
+                $notes[] = "[کاربر روی یه {$data[0]} ریپلای کرده؛ {$data[1]}]";
             } elseif ($rt !== '') {
                 $notes[] = "[پیامی که کاربر روش ریپلای کرده]: {$rt}";
             } elseif (!empty($reply['from'])) {
                 $notes[] = '[کاربر روی یه پیام ریپلای کرده که متن نداره]';
             }
         }
+        if ($reply && count($notes) > $n0) {
+            $notes[$n0] = self::withAlbum($notes[$n0], $reply);
+        }
+        $n1 = count($notes);
 
-        if (isset($msg['voice']) || isset($msg['audio']) || isset($msg['photo'])) {
+        if (self::hasMedia($msg)) {
             $media = self::mediaPart($msg);
-            if (!$media) {
+            $info  = self::fileInfo($msg);
+            $data  = self::dataInfo($msg);
+            if (!$media && $info === null && $data === null) {
                 $tg->reply($msg, '😕 نتونستم فایلت رو دانلود کنم؛' . "\n" . 'دوباره بفرست.');
                 return;
             }
-            $parts[] = $media;
-            $isVoice = isset($msg['voice']) || isset($msg['audio']);
-            $notes[] = $isVoice
-                ? '[کاربر ویس فرستاده؛ گوش بده و دقیقاً به حرفش جواب بده، انگار متنی پرسیده]'
-                : '[کاربر عکس فرستاده؛ ببینش و جواب بده]';
+            if ($media) {
+                $parts[] = $media;
+            }
+            $isVoice = isset($msg['voice']);
+            $notes[] = $data !== null
+                ? "[کاربر یه {$data[0]} فرستاده؛ {$data[1]}]"
+                : ($info !== null
+                ? "[کاربر یه فایل فرستاده؛ {$info}]"
+                : ($isVoice
+                    ? '[کاربر ویس فرستاده؛ گوش بده و دقیقاً به حرفش جواب بده، انگار متنی پرسیده]'
+                    : (isset($msg['photo']) ? '[کاربر عکس فرستاده؛ ببینش و جواب بده]' : '[کاربر ' . self::kind($msg) . ' فرستاده؛ ' . (self::isFrame($msg) ? 'فقط عکسِ فریم اولش پیوست شده' : 'عکسش پیوست شده') . '، ببینش و جواب بده]')));
             $log = '[' . self::kind($msg) . '] ' . $question;
+            if (count($notes) > $n1) {
+                $notes[$n1] = self::withAlbum($notes[$n1], $msg);
+            }
         }
 
         $text = trim(implode("\n", $notes) . ($question !== '' ? "\n\n{$question}" : ''));

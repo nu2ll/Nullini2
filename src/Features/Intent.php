@@ -2,7 +2,7 @@
 
 final class Intent
 {
-    public const NAMES = ['translate', 'download', 'wiki', 'search', 'weather', 'rates', 'font', 'qr', 'fal', 'password', 'date', 'coin', 'calc', 'nid', 'love', 'roast', 'userinfo', 'giveaway'];
+    public const NAMES = ['translate', 'download', 'wiki', 'search', 'weather', 'rates', 'font', 'qr', 'fal', 'password', 'date', 'coin', 'calc', 'nid', 'love', 'roast', 'userinfo', 'giveaway', 'aicheck'];
 
     public static function prompt(): string
     {
@@ -25,6 +25,7 @@ final class Intent
             . "\n- love | <نفر اول> | <نفر دوم>: درصد عشق دو نفر."
             . "\n- roast | <me یا reply یا @یوزرنیم یا آیدی عددی>: روست کردن یه آدم؛ me یعنی خود کاربر، reply یعنی صاحب پیامی که روش ریپلای کرده. فقط برای یه روست جدید؛ نظر دادن درباره‌ی روست قبلی درخواست روست نیست."
             . "\n- userinfo: اطلاعات اکانت تلگرام خود کاربر."
+            . "\n- aicheck: تشخیص این‌که عکسی که کاربر فرستاده یا روش ریپلای کرده با هوش مصنوعی ساخته شده یا واقعیه."
             . "\nاگه فقط درباره‌ی این موضوعات حرف زد یا سؤال کلی پرسید و انجام خود کار رو نخواست، خودت جواب بده و دستور «[[ ]]» ننویس.";
     }
 
@@ -62,7 +63,7 @@ final class Intent
             $private ? Giveaway::start($msg) : Giveaway::fromGroup($msg);
             return true;
         }
-        if (in_array($name, ['translate', 'rates', 'weather', 'wiki', 'search', 'love', 'roast'], true)) {
+        if (in_array($name, ['translate', 'rates', 'weather', 'wiki', 'search', 'love', 'roast', 'aicheck'], true)) {
             $tg->action($chat, 'typing');
         }
 
@@ -85,6 +86,9 @@ final class Intent
             'reply_markup'         => $o['kb'] ?? null,
             'link_preview_options' => $o['preview'] ?? null,
         ]));
+        foreach ($o['more'] ?? [] as $part) {
+            $tg->reply($msg, $part);
+        }
         return true;
     }
 
@@ -197,6 +201,10 @@ final class Intent
             case 'userinfo':
                 [$text, $kb] = UserInfo::card($msg['from'], $guest ? null : ($msg['chat']['type'] ?? null));
                 return ['text' => $text, 'kb' => $kb];
+
+            case 'aicheck':
+                $pages = AiDetect::pages(AiDetect::report($msg));
+                return ['text' => array_shift($pages), 'more' => $pages];
 
             case 'giveaway':
                 return $guest ? ['text' => "🎁 قرعه‌کشی رو تو پیوی من بساز 👇", 'kb' => ikb([[urlBtn('🎁 ساخت قرعه‌کشی', "https://t.me/{$bot}?start=giveaway", 'success')]])] : null;

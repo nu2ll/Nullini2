@@ -74,7 +74,7 @@ final class Love
                 . "حداکثر ۱۴ کلمه، فقط یه ایموجی، بدون توهین و محتوای جنسی، بدون مارک‌داون.\n"
                 . "دقیقاً دو خط جواب بده:\nPERCENT: <عدد>\nTEXT: <جمله>"],
             ['role' => 'user', 'content' => "نفر اول: {$a}\nنفر دوم: {$b}"],
-        ], ['tier' => 'lite', 'temperature' => 1.0, 'max_tokens' => 120, 'deadline' => microtime(true) + 20, 'thinking' => null, 'section' => 'love']);
+        ], ['tier' => 'lite', 'temperature' => 1.0, 'deadline' => microtime(true) + 20, 'thinking' => null, 'section' => 'love']);
         if ($out !== null && preg_match('/PERCENT\s*:\s*(\d{1,3})/iu', en($out), $pm)) {
             $p    = max(0, min(100, (int) $pm[1]));
             $line = preg_match('/TEXT\s*:\s*(.+)/iu', $out, $tm) ? mb_substr(mbTrim(str_replace(['*', '`'], '', $tm[1]), " \t\"'«»"), 0, 160) : '';

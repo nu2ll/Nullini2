@@ -17,8 +17,7 @@ final class GuestHandler
 
         $reply    = $msg['reply_to_message'] ?? null;
         $rt       = $reply ? trim((string) ($reply['text'] ?? $reply['caption'] ?? '')) : '';
-        $hasMedia = isset($msg['photo']) || isset($msg['voice']) || isset($msg['audio'])
-            || ($reply && (isset($reply['photo']) || isset($reply['voice']) || isset($reply['audio'])));
+        $hasMedia = Assistant::hasMedia($msg) || ($reply && Assistant::hasMedia($reply));
 
         if ($q === '' && $rt === '' && !$hasMedia) {
             self::send($qid, Ui::hello(), Ui::groupKeyboard());
@@ -42,17 +41,32 @@ final class GuestHandler
         if ($reply) {
             if ($m = Assistant::mediaPart($reply)) {
                 $parts[] = $m;
-                $notes[] = '[کاربر روی یه پیام چندرسانه‌ای ریپلای کرده که پیوست شده' . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
+                $notes[] = '[کاربر روی یه ' . Assistant::kind($reply) . ' ریپلای کرده که پیوست شده' . (Assistant::isFrame($reply) ? '؛ فقط عکسِ فریم اولش پیوسته' : '') . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
+            } elseif ($info = Assistant::fileInfo($reply)) {
+                $notes[] = "[کاربر روی یه فایل ریپلای کرده؛ {$info}" . ($rt !== '' ? "؛ متنش: {$rt}" : '') . ']';
+            } elseif ($data = Assistant::dataInfo($reply)) {
+                $notes[] = "[کاربر روی یه {$data[0]} ریپلای کرده؛ {$data[1]}]";
             } elseif ($rt !== '') {
                 $notes[] = "[پیامی که کاربر روش ریپلای کرده]: {$rt}";
             } elseif (!empty($reply['from'])) {
                 $notes[] = '[کاربر روی یه پیام ریپلای کرده که متن نداره]';
             }
         }
-        if (isset($msg['photo']) || isset($msg['voice']) || isset($msg['audio'])) {
+        if ($reply && $notes) {
+            $notes[0] = Assistant::withAlbum($notes[0], $reply);
+        }
+        $n1 = count($notes);
+        if (Assistant::hasMedia($msg)) {
             if ($m = Assistant::mediaPart($msg)) {
                 $parts[] = $m;
-                $notes[] = isset($msg['photo']) ? '[کاربر عکس فرستاده؛ ببینش و جواب بده]' : '[کاربر ویس فرستاده؛ گوش بده و جواب بده]';
+                $notes[] = isset($msg['voice']) ? '[کاربر ویس فرستاده؛ گوش بده و جواب بده]' : (isset($msg['photo']) ? '[کاربر عکس فرستاده؛ ببینش و جواب بده]' : '[کاربر ' . Assistant::kind($msg) . ' فرستاده؛ ' . (Assistant::isFrame($msg) ? 'فقط عکسِ فریم اولش پیوست شده' : 'عکسش پیوست شده') . '، ببینش و جواب بده]');
+            } elseif ($info = Assistant::fileInfo($msg)) {
+                $notes[] = "[کاربر یه فایل فرستاده؛ {$info}]";
+            } elseif ($data = Assistant::dataInfo($msg)) {
+                $notes[] = "[کاربر یه {$data[0]} فرستاده؛ {$data[1]}]";
+            }
+            if (count($notes) > $n1) {
+                $notes[$n1] = Assistant::withAlbum($notes[$n1], $msg);
             }
         }
         $body    = trim(implode("\n", $notes) . ($q !== '' ? "\n\n{$q}" : ''));
@@ -60,7 +74,7 @@ final class GuestHandler
 
         $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
         $live = $imid !== null && App::cfg('ai_stream', true) ? new LiveReply($msg, $imid, '', false) : null;
-        $opt  = ['reaction' => false, 'max_tokens' => 1500] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res  = AI::reply($content, $ctx, [], $opt);
 
         if (!empty($res['action'])) {
