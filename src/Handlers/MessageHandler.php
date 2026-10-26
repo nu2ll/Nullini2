@@ -77,7 +77,7 @@ final class MessageHandler
         }
 
         if (is_array($msg['dice'] ?? null)) {
-            App::tg()->reply($msg, Ui::diceHello((string) ($msg['dice']['emoji'] ?? '🎲')));
+            App::tg()->reply($msg, Ui::diceHello((string) ($msg['dice']['emoji'] ?? '🎲'), (int) ($msg['dice']['value'] ?? 0)));
             return;
         }
 

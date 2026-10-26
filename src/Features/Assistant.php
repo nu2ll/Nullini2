@@ -451,7 +451,7 @@ final class Assistant
                 : ($isVoice
                     ? '[کاربر ویس فرستاده؛ گوش بده و دقیقاً به حرفش جواب بده، انگار متنی پرسیده]'
                     : (isset($msg['photo']) ? '[کاربر عکس فرستاده؛ ببینش و جواب بده]' : '[کاربر ' . self::kind($msg) . ' فرستاده؛ ' . (self::isFrame($msg) ? 'فقط عکسِ فریم اولش پیوست شده' : 'عکسش پیوست شده') . '، ببینش و جواب بده]')));
-            $log = '[' . self::kind($msg) . '] ' . $question;
+            $log = '[' . self::kind($msg) . '] ' . (isset($msg['contact']) && $data !== null ? $data[1] . ' ' : '') . $question;
             if (count($notes) > $n1) {
                 $notes[$n1] = self::withAlbum($notes[$n1], $msg);
             }

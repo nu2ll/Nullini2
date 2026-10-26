@@ -448,25 +448,8 @@ final class Downloader
     private static function cardKeyboard(string $token, string $site, array $info, bool $hasVideo, int $max): array
     {
         $rows = [];
-        $row  = [];
         foreach (self::options($site, $info, $hasVideo, $max) as $i => [$fmt, $label]) {
-            $b = btn($label, "dl:{$token}:{$fmt}", $i === 0 ? 'success' : 'primary');
-            if ($fmt === 'mp3') {
-                if ($row) {
-                    $rows[] = $row;
-                }
-                $rows[] = [$b];
-                $row    = [];
-                continue;
-            }
-            $row[] = $b;
-            if (count($row) === 2) {
-                $rows[] = $row;
-                $row    = [];
-            }
-        }
-        if ($row) {
-            $rows[] = $row;
+            $rows[] = [btn($label, "dl:{$token}:{$fmt}", $i === 0 ? 'success' : 'primary')];
         }
         $rows[] = [btn('✖️ بیخیال', "dl:{$token}:x", null)];
         return ikb($rows);
