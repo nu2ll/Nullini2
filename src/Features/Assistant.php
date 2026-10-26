@@ -173,6 +173,39 @@ final class Assistant
             }
             return [$quiz ? 'آزمون' : 'نظرسنجی', implode(' | ', $f)];
         }
+        if (is_array($m['contact'] ?? null)) {
+            $c    = $m['contact'];
+            $name = trim((string) ($c['first_name'] ?? '') . ' ' . (string) ($c['last_name'] ?? ''));
+            $f    = [];
+            if ($name !== '') {
+                $f[] = 'نام: ' . $name;
+            }
+            if (!empty($c['phone_number'])) {
+                $f[] = 'شماره: ' . $c['phone_number'];
+            }
+            if (!empty($c['user_id'])) {
+                $f[] = 'آیدی عددی تلگرام: ' . $c['user_id'] . ' (عضو تلگرامه)';
+            }
+            if (!empty($c['vcard'])) {
+                foreach (['ORG' => 'سازمان', 'TITLE' => 'عنوان', 'EMAIL' => 'ایمیل', 'URL' => 'لینک', 'BDAY' => 'تولد', 'NOTE' => 'یادداشت'] as $k => $label) {
+                    if (preg_match('/^' . $k . '[^:\r\n]*:(.+)$/mi', (string) $c['vcard'], $mm) && trim($mm[1]) !== '') {
+                        $f[] = $label . ': ' . mb_substr(trim($mm[1]), 0, 200);
+                    }
+                }
+            }
+            return $f ? ['مخاطب', implode(' | ', $f)] : null;
+        }
+        if (is_array($m['dice'] ?? null)) {
+            $emoji = (string) ($m['dice']['emoji'] ?? '🎲');
+            $val   = (int) ($m['dice']['value'] ?? 0);
+            [$name, $rule] = self::diceKind($emoji);
+            $reels = '';
+            if ($name === 'اسلات' && $val >= 1 && $val <= 64) {
+                $sym   = ['بار', 'انگور', 'لیمو', '۷'];
+                $reels = ' | قرقره‌ها از چپ به راست: ' . $sym[($val - 1) % 4] . ' - ' . $sym[intdiv($val - 1, 4) % 4] . ' - ' . $sym[intdiv($val - 1, 16)];
+            }
+            return [$name, 'ایموجی: ' . $emoji . ' | نتیجه: ' . ($m['dice']['value'] ?? '?') . $reels . ($rule !== '' ? ' | ' . $rule : '')];
+        }
         $v = is_array($m['venue'] ?? null) ? $m['venue'] : null;
         $l = $v['location'] ?? $m['location'] ?? null;
         if (!is_array($l) || !isset($l['latitude'], $l['longitude'])) {
@@ -194,6 +227,19 @@ final class Assistant
             $f[] = 'آدرس تقریبی روی نقشه: ' . $place;
         }
         return [$v ? 'مکان' : 'لوکیشن', implode(' | ', $f)];
+    }
+
+    /** اسم و قانون نتیجه‌ی هر ایموجیِ بازی تلگرام: [اسم، توضیح نتیجه] */
+    private static function diceKind(string $emoji): array
+    {
+        return match (str_replace("\u{FE0F}", '', $emoji)) {
+            '🎯'    => ['دارت', 'عدد ۱ یعنی خطا و ۶ یعنی وسط هدف'],
+            '🏀'    => ['بسکتبال', 'عدد ۴ و ۵ یعنی توپ داخل حلقه رفت، کمتر یعنی نرفت'],
+            '⚽'    => ['پنالتی فوتبال', 'عدد ۳ و ۴ و ۵ یعنی گل شد، ۱ و ۲ یعنی گل نشد'],
+            '🎳'    => ['بولینگ', 'عدد ۶ یعنی استرایک و ۱ یعنی خطا'],
+            '🎰'    => ['اسلات', 'سه نماد یکسان یعنی برد و سه تا ۷ یعنی جک‌پات'],
+            default => ['تاس', ''],
+        };
     }
 
     private static function placeName(float $lat, float $lon): string
@@ -267,7 +313,7 @@ final class Assistant
 
     public static function hasMedia(array $m): bool
     {
-        return isset($m['voice']) || isset($m['audio']) || isset($m['document']) || isset($m['poll']) || isset($m['venue']) || isset($m['location']) || isset($m['photo']) || isset($m['sticker']) || isset($m['animation']) || isset($m['video']) || isset($m['video_note']);
+        return isset($m['voice']) || isset($m['audio']) || isset($m['document']) || isset($m['poll']) || isset($m['contact']) || isset($m['dice']) || isset($m['venue']) || isset($m['location']) || isset($m['photo']) || isset($m['sticker']) || isset($m['animation']) || isset($m['video']) || isset($m['video_note']);
     }
 
     public static function mediaPart(array $m): ?array
@@ -300,6 +346,8 @@ final class Assistant
             isset($m['video']) || isset($m['video_note']) => 'ویدیو',
             isset($m['document'])                    => 'فایل',
             isset($m['poll'])                        => 'نظرسنجی',
+            isset($m['contact'])                     => 'مخاطب',
+            isset($m['dice'])                        => self::diceKind((string) ($m['dice']['emoji'] ?? '🎲'))[0],
             isset($m['venue'])                       => 'مکان',
             isset($m['location'])                    => 'لوکیشن',
             default                                  => 'پیام',

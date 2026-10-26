@@ -175,13 +175,6 @@ final class MessageHandler
                 }
                 return true;
 
-            case 'isai':
-                $tg->action($chatId, 'typing');
-                foreach (AiDetect::pages(AiDetect::report($msg)) as $part) {
-                    $tg->reply($msg, $part);
-                }
-                return true;
-
             case 'font':
             case 'ft':
                 $tg->reply($msg, $args === '' ? Ui::guide('font') : Fonts::listText($args));

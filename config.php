@@ -34,22 +34,9 @@ return [
         ],
         'free_order'  => [
             'groq' => envList('GROQ_MODELS'),
-            'apinex' => envList('APINEX_MODELS', [
-                'free/gpt-6-luna', 'free/deepseek-v4.1-flash', 'free/gemini-3.8-flash', 'free/deepseek-v4-pro-0813',
-                'free/glm-5.3', 'free/glm-5.3-flash', 'free/glm-5.3-flashx', 'free/muse-spark-1.3',
-                'free/minimax-m3.1-flash', 'free/mimo-v2.6-pro', 'free/jev-1.13',
-            ]),
-        ],
-        'free_only'   => [
-            'apinex' => true, // فقط مدل‌های لیست free_order (رایگان‌ها)؛ مدل‌های پولی استفاده نشن
-        ],
-        'free_skip'   => [
-            'toptools' => envList('TOPTOOLS_SKIP', ['claude-opus-5', 'gpt-5.6-sol', 'DeepSeek-V4-Flash-Vision-Exp']),
         ],
         'free_keys'   => [
             'groq'       => envList('GROQ_KEYS'),
-            'toptools'   => envList('TOPTOOLS_KEYS'),
-            'apinex'     => envList('APINEX_KEYS'),
         ],
     ],
     'storage_chat' => env('STORAGE_CHAT_ID', ''),
@@ -57,7 +44,6 @@ return [
     'ai_typing_effect'   => true,
     'ai_stream'          => env('AI_STREAM', '1') !== '0',
 
-    'image_toptools_model' => env('TOPTOOLS_IMAGE_MODEL', 'top-tools-ai'),
     'cloudflare_account_id' => env('CF_ACCOUNT_ID', ''),
     'cloudflare_api_token'  => env('CF_API_TOKEN', ''),
     'cloudflare_image_model' => env('CF_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell'),

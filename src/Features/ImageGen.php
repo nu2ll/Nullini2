@@ -32,35 +32,6 @@ final class ImageGen
         return $chat === '' ? null : App::tg()->photoFileId($chat, $bytes);
     }
 
-    private static function topTools(string $prompt, callable $tick): ?string
-    {
-        $keys = FreeAI::keys('toptools');
-        if (!$keys) {
-            return null;
-        }
-        $key = $keys[array_rand($keys)];
-        $tick();
-        $r = Http::postJson(
-            FreeAI::PROVIDERS['toptools']['url'] . '/chat/completions',
-            [
-                'model'    => App::cfg('image_toptools_model', 'top-tools-ai'),
-                'messages' => [['role' => 'user', 'content' => 'Generate an image: ' . $prompt]],
-            ],
-            ['Authorization: Bearer ' . $key],
-            120
-        );
-        $text = (string) ($r['data']['choices'][0]['message']['content'] ?? '');
-        if ($r['code'] === 200 && trim($text) !== '' && !preg_match('~https?://[^\s)\]>"\']+~u', $text)) {
-            self::$notice = trim($text);
-            return null;
-        }
-        if ($r['code'] !== 200 || !preg_match('~https?://[^\s)\]>"\']+~u', $text, $m)) {
-            logWarn('image', "toptools failed (HTTP {$r['code']}): " . mb_substr((string) ($r['data']['error']['message'] ?? $text ?: $r['raw']), 0, 160));
-            return null;
-        }
-        return self::fetch($m[0], '', $tick);
-    }
-
     private static function cloudflare(string $prompt, callable $tick): ?string
     {
         $account = trim((string) App::cfg('cloudflare_account_id', ''));
@@ -96,80 +67,12 @@ final class ImageGen
         return null;
     }
 
-    private static function useTopTools(): bool
-    {
-        $model = (string) App::cfg('image_toptools_model', 'top-tools-ai');
-        return strcasecmp(AI::route(), 'toptools:' . $model) === 0;
-    }
-
     public static function generate(string $prompt, callable $tick): ?string
     {
-        // ترتیب: تاپ‌تولز (فقط وقتی مدل فعال پنل همون باشه) ← کلادفلر Flux
         self::$notice   = null;
         self::$failMsg  = null;
         self::$quotaOut = false;
-        if (self::useTopTools()) {
-            $bytes = self::topTools($prompt, $tick);
-            if ($bytes !== null) {
-                return $bytes;
-            }
-            if (self::$notice !== null) {
-                return null;
-            }
-        }
         return self::cloudflare($prompt, $tick);
-    }
-
-    private static function fetch(string $url, string $key, callable $tick): ?string
-    {
-        $headers = ['Accept: image/*'];
-        if ($key !== '') {
-            $headers[] = 'Authorization: Bearer ' . $key;
-        }
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_TIMEOUT        => 120,
-            CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 NulliniBot/3.0',
-        ]);
-
-        $mh = curl_multi_init();
-        curl_multi_add_handle($mh, $ch);
-        $last = microtime(true);
-        do {
-            $status = curl_multi_exec($mh, $running);
-            if ($running && curl_multi_select($mh, 1.0) === -1) {
-                usleep(100000);
-            }
-            if (microtime(true) - $last >= 4) {
-                $tick();
-                $last = microtime(true);
-            }
-        } while ($running && $status === CURLM_OK);
-
-        $raw  = curl_multi_getcontent($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_multi_remove_handle($mh, $ch);
-        curl_close($ch);
-        curl_multi_close($mh);
-
-        if ($code !== 200 || !is_string($raw) || $raw === '' || @getimagesizefromstring($raw) === false) {
-            logWarn('image', "generation failed (HTTP {$code})");
-            if (in_array($code, [400, 422], true) && is_string($raw) && $raw !== '') {
-                $j   = json_decode($raw, true);
-                $msg = is_array($j)
-                    ? (string) ($j['error']['message'] ?? $j['message'] ?? (is_string($j['error'] ?? null) ? $j['error'] : ''))
-                    : trim(strip_tags($raw));
-                if ($msg !== '') {
-                    self::$notice = $msg;
-                }
-            }
-            return null;
-        }
-        return $raw;
     }
 
     private static function status(array $msg): ?int
