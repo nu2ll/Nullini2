@@ -56,6 +56,7 @@ final class MessageHandler
             || ($group && !empty($msg['is_automatic_forward']))
             || ($group && self::isReplyToBot($msg))
             || ($group && $mentioned)
+            || ($group && is_array($msg['dice'] ?? null))
             || ($group && mb_strpos($text, self::TRIGGER) !== false);
 
         if (!$shouldRespond) {
@@ -72,6 +73,11 @@ final class MessageHandler
 
         if ($link !== null) {
             Downloader::offer($msg, $link);
+            return;
+        }
+
+        if (is_array($msg['dice'] ?? null)) {
+            App::tg()->reply($msg, Ui::diceHello((string) ($msg['dice']['emoji'] ?? '🎲')));
             return;
         }
 

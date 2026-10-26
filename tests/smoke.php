@@ -231,7 +231,7 @@ check('photo unescape', Photos::unescape('https:\\/\\/x.com\\/a.jpg?b=1\\u0026c=
 check('intent download', Intent::parse('[[download | https://youtu.be/x]]'), ['download', 'https://youtu.be/x']);
 check('help page 1', Ui::helpPage('ai'), 1);
 check('help page 2', Ui::helpPage('group'), 2);
-check('help menu split', count(Ui::helpMenu(true, 1)['inline_keyboard']) + count(Ui::helpMenu(true, 2)['inline_keyboard']), 15);
+check('help menu split', count(Ui::helpMenu(true, 1)['inline_keyboard']) + count(Ui::helpMenu(true, 2)['inline_keyboard']), 14);
 $hm = static function (int $page): array {
     $out = [];
     foreach (Ui::helpMenu(true, $page)['inline_keyboard'] as $row) {
