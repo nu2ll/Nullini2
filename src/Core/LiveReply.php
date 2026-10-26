@@ -103,6 +103,12 @@ final class LiveReply
             return null;
         }
 
+        // Image-generation tags are actions, not user-facing streamed text.
+        // Show the drawing status while the image-generation handler works.
+        if (preg_match('/^\s*\[\[\s*image\s*[|｜:：]/iu', $t)) {
+            return self::DRAWING;
+        }
+
         if (preg_match('/^\s*\[\[\s*(' . implode('|', Intent::NAMES) . ')(?![A-Za-z])/iu', $t)) {
             return false;
         }
