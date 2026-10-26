@@ -33,7 +33,7 @@ final class Assistant
         $m = Store::get('ai_memory', self::memKey($chatId, $userId));
         $msgs = is_array($m) && ($m['day'] ?? '') === date('Y-m-d') ? ($m['messages'] ?? []) : [];
         // قالب قدیمی «[یه عکس براش ساختم: ...]» از حافظه حذف می‌شه
-        return array_values(array_filter($msgs, static fn($x) => !str_contains((string) ($x['content'] ?? ''), 'یه عکس براش ساختم')));
+        return array_values(array_filter($msgs, static fn($x) => !preg_match('/یه عکس براش ساختم|\[\[\s*image/u', (string) ($x['content'] ?? ''))));
     }
 
     private static function remember(int $chatId, int $userId, string $user, string $assistant): void
@@ -289,6 +289,34 @@ final class Assistant
         return null;
     }
 
+    private static function routeKind(array $m): string
+    {
+        return match (true) {
+            isset($m['photo'])                            => 'photo',
+            isset($m['voice'])                            => 'voice message',
+            isset($m['audio'])                            => 'music file',
+            isset($m['sticker'])                          => 'sticker',
+            isset($m['animation'])                        => 'gif',
+            isset($m['video']) || isset($m['video_note']) => 'video',
+            isset($m['document'])                         => 'file',
+            isset($m['poll'])                             => 'poll',
+            isset($m['venue']) || isset($m['location'])   => 'location',
+            default                                       => '',
+        };
+    }
+
+    public static function routeContext(array $msg, array $history = []): array
+    {
+        $reply = $msg['reply_to_message'] ?? null;
+        return [
+            'attach'     => self::routeKind($msg),
+            'reply_kind' => is_array($reply) ? self::routeKind($reply) : '',
+            'reply_text' => is_array($reply) ? trim((string) ($reply['text'] ?? $reply['caption'] ?? '')) : '',
+            'reply_bot'  => !empty($reply['from']['is_bot']),
+            'history'    => $history,
+        ];
+    }
+
     public static function kind(array $m): string
     {
         return match (true) {
@@ -358,9 +386,10 @@ final class Assistant
             }
         }
 
-        $parts = [];
-        $notes = [];
-        $log   = $question;
+        $parts     = [];
+        $notes     = [];
+        $log       = $question;
+        $voiceText = '';
 
         $reply = $msg['reply_to_message'] ?? null;
         $n0    = count($notes);
@@ -395,6 +424,9 @@ final class Assistant
             if ($media) {
                 $parts[] = $media;
             }
+            if ($media && $question === '' && isset($msg['voice']) && !$service) {
+                $voiceText = trim((string) AI::transcribe((string) base64_decode((string) $media['data']), (string) $media['mime']));
+            }
             $isVoice = isset($msg['voice']);
             $notes[] = $data !== null
                 ? "[کاربر یه {$data[0]} فرستاده؛ {$data[1]}]"
@@ -403,7 +435,7 @@ final class Assistant
                 : ($isVoice
                     ? '[کاربر ویس فرستاده؛ گوش بده و دقیقاً به حرفش جواب بده، انگار متنی پرسیده]'
                     : (isset($msg['photo']) ? '[کاربر عکس فرستاده؛ ببینش و جواب بده]' : '[کاربر ' . self::kind($msg) . ' فرستاده؛ ' . (self::isFrame($msg) ? 'فقط عکسِ فریم اولش پیوست شده' : 'عکسش پیوست شده') . '، ببینش و جواب بده]')));
-            $log = '[' . self::kind($msg) . '] ' . $question;
+            $log = '[' . self::kind($msg) . '] ' . ($question !== '' ? $question : $voiceText);
             if (count($notes) > $n1) {
                 $notes[$n1] = self::withAlbum($notes[$n1], $msg);
             }
@@ -419,6 +451,18 @@ final class Assistant
         }
 
         $history = $service ? [] : self::history($chatId, $userId);
+
+        if (!$service && ($act = Intent::decide($question !== '' ? $question : $voiceText, self::routeContext($msg, $history))) !== null) {
+            [$name, $arg] = $act;
+            if ($name === 'image' && $arg === '') {
+                $arg = $voiceText;
+            }
+            if (Intent::run($msg, $name, $arg)) {
+                self::remember($chatId, $userId, $log, '[' . $name . ($arg !== '' ? ': ' . $arg : '') . ' رو براش انجام دادم]');
+                return;
+            }
+        }
+
         $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
         $opt     = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res     = AI::reply($content, $ctx, $history, $opt);
@@ -427,31 +471,6 @@ final class Assistant
             $tg->react($chatId, (int) $msg['message_id'], $res['reaction']);
         }
 
-        if (!empty($res['action'])) {
-            $live?->discard();
-            [$act, $arg] = $res['action'];
-            if (Intent::run($msg, $act, $arg)) {
-                if (!$service) {
-                    self::remember($chatId, $userId, $log, '[' . $act . ($arg !== '' ? ': ' . $arg : '') . ' رو براش انجام دادم]');
-                }
-                return;
-            }
-            $res = AI::reply($content, ['no_action' => true] + $ctx, $history, $opt);
-        }
-
-        if (!empty($res['image']) || !empty($res['image_partial'])) {
-            Users::hit('image');
-            $caption = null;
-            if (!empty($res['image_partial'])) {
-                $plan = AI::imagePrompt($question !== '' ? $question : (string) ($msg['text'] ?? ''));
-                $res['image'] = $plan['prompt'] ?? (AI::googleTranslate($question, 'English') ?? $question);
-                $caption      = $plan['caption'] ?? null;
-            }
-            if (ImageGen::draw($msg, $res['image'], $caption, $live) && !$service) {
-                self::remember($chatId, $userId, $log, '[[image | ' . mb_substr($res['image'], 0, 200) . ']]');
-            }
-            return;
-        }
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
 
         if (!$live || !$live->finish($answer)) {

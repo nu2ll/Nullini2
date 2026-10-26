@@ -36,6 +36,24 @@ final class GuestHandler
 
         $imid = self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
 
+        if (($act = Intent::decide($q, Assistant::routeContext($msg))) !== null) {
+            [$name, $arg] = $act;
+            Users::hit('intent:' . $name);
+            if ($name === 'image' && $imid !== null) {
+                self::image($imid, $qid, ImageGen::englishPrompt($arg !== '' ? $arg : $q));
+                return;
+            }
+            if ($name === 'download' && ($dl = Downloader::find($arg . ' ' . $rt)) !== null && $imid !== null) {
+                Downloader::guest($from, $dl, $imid);
+                return;
+            }
+            $o = Intent::output(['from' => $from] + $msg, $name, $arg, true, $imid);
+            if ($o !== null) {
+                self::show($imid, $qid, $o);
+                return;
+            }
+        }
+
         $parts = [];
         $notes = [];
         if ($reply) {
@@ -77,30 +95,10 @@ final class GuestHandler
         $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res  = AI::reply($content, $ctx, [], $opt);
 
-        if (!empty($res['action'])) {
-            [$act, $arg] = $res['action'];
-            Users::hit('intent:' . $act);
-            if ($act === 'download' && ($dl = Downloader::find($arg . ' ' . $rt)) !== null && $imid !== null) {
-                Downloader::guest($from, $dl, $imid);
-                return;
-            }
-            $o = Intent::output(['from' => $from] + $msg, $act, $arg, true, $imid);
-            if ($o !== null) {
-                self::show($imid, $qid, $o);
-                return;
-            }
-            $res = AI::reply($content, ['no_action' => true] + $ctx, [], $opt);
-        }
-
-        if ($res['answer'] === null && empty($res['image']) && $parts) {
+        if ($res['answer'] === null && $parts) {
             logWarn('guest', 'reply with media failed, retrying text-only');
             $note = '[کاربر به یه عکس یا ویس اشاره کرده ولی تو به محتواش دسترسی نداری؛ اگه سؤالش به اون بستگی داره، مؤدبانه بگو تو این چت فایل رو نمی‌بینی و بهتره تو پیوی برات بفرسته]';
             $res  = AI::reply(trim($note . ($rt !== '' ? "\n[متن پیام ریپلای‌شده]: {$rt}" : '') . ($q !== '' ? "\n\n{$q}" : '')), $ctx, [], $opt);
-        }
-
-        if (!empty($res['image'])) {
-            self::image($imid, $qid, (string) $res['image']);
-            return;
         }
 
         $answer = $res['answer'] ?? AI::FAIL_TEXT;

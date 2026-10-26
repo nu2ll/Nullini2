@@ -23,6 +23,8 @@ final class AiDetect
         . 'physics (shadow direction, reflections, lighting consistency), textures (plastic or waxy skin, over-smooth surfaces, uniform fake bokeh), '
         . 'melted or repeated patterns, background coherence (impossible geometry, warped objects, merged items), clothing and jewelry continuity, '
         . 'and the typical over-polished cinematic AI look. Also look for real-photo evidence: natural sensor noise, motion blur, imperfect framing, mundane details. '
+        . 'Do not explain away impossible or implausible structure as disease, damage, sculpture or art style; anatomy or physics that cannot exist is strong evidence of AI. '
+        . 'Anime or digital-art style alone is not evidence either way; judge it by AI artifacts such as inconsistent details, melted lines, mismatched accessories and over-rendered gloss. '
         . 'Be calibrated: never call an image AI only because it is beautiful, filtered, edited, compressed or drawn by a human. '
         . 'Reply with ONLY a JSON object: {"ai_probability": <integer 0-100>, "kind": "photo"|"illustration"|"screenshot"|"other", '
         . '"signs": [<every observation that supports your verdict, in casual Persian, as many and as detailed as you see fit>]}';
@@ -201,7 +203,7 @@ final class AiDetect
                 ['type' => 'text', 'text' => 'Analyze this image and answer with the JSON only.'],
             ]],
         ];
-        $opt  = ['tier' => 'smart', 'temperature' => 0.2, 'section' => 'other'];
+        $opt  = ['tier' => 'smart', 'temperature' => 0, 'section' => 'other'];
         $text = AI::chat($messages, ['deadline' => microtime(true) + 40] + $opt);
         if ($text === null && AI::hasTiers()) {
             $text = AI::chat($messages, ['tier' => 'lite', 'thinking' => null, 'deadline' => microtime(true) + 25] + $opt);

@@ -166,28 +166,27 @@ final class InlineHandler
             Downloader::guest($from, $link, $imid);
             return true;
         }
-        $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
-        $live = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
-        $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
-        $res  = AI::reply($q, $ctx, [], $opt);
-        if (!empty($res['action'])) {
-            [$act, $arg] = $res['action'];
-            Users::hit('intent:' . $act);
-            if ($act === 'download' && ($dl = Downloader::find($arg)) !== null) {
+        if (($act = Intent::decide($q)) !== null) {
+            [$name, $arg] = $act;
+            Users::hit('intent:' . $name);
+            if ($name === 'image') {
+                GuestHandler::image($imid, null, ImageGen::englishPrompt($arg !== '' ? $arg : $q));
+                return true;
+            }
+            if ($name === 'download' && ($dl = Downloader::find($arg)) !== null) {
                 Downloader::guest($from, $dl, $imid);
                 return true;
             }
-            $o = Intent::output(['from' => $from, 'chat' => ['type' => 'inline'], 'message_id' => 0], $act, $arg, true, $imid);
+            $o = Intent::output(['from' => $from, 'chat' => ['type' => 'inline'], 'message_id' => 0], $name, $arg, true, $imid);
             if ($o !== null) {
                 GuestHandler::show($imid, '', $o);
                 return true;
             }
-            $res = AI::reply($q, ['no_action' => true] + $ctx, [], $opt);
         }
-        if (!empty($res['image'])) {
-            GuestHandler::image($imid, null, (string) $res['image']);
-            return true;
-        }
+        $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
+        $live = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
+        $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $res  = AI::reply($q, $ctx, [], $opt);
         if ($res['answer'] === null) {
             return false;
         }

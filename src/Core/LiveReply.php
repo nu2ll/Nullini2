@@ -103,9 +103,6 @@ final class LiveReply
             return null;
         }
 
-        if (preg_match('/^\s*\[\[\s*image(?![A-Za-z])/iu', $t)) {
-            return self::DRAWING;
-        }
         if (preg_match('/^\s*\[\[\s*(' . implode('|', Intent::NAMES) . ')(?![A-Za-z])/iu', $t)) {
             return false;
         }

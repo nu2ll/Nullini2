@@ -188,6 +188,11 @@ final class ImageGen
         }
     }
 
+    public static function englishPrompt(string $request): string
+    {
+        return AI::googleTranslate($request, 'English') ?? (AI::imagePrompt($request)['prompt'] ?? $request);
+    }
+
     public static function handle(array $msg, string $request): void
     {
         $tg       = App::tg();
