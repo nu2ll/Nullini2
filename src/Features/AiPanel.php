@@ -71,7 +71,7 @@ final class AiPanel
         $on   = AI::routerOn();
         $set  = AI::routerSetting();
         $cur  = $set === '' ? '' : explode(':', $set, 2)[0];
-        $rows = [[btn($on ? 'خاموش' : 'روشن', 'ai:rt', $on ? 'danger' : 'success')]];
+        $rows = [[btn($on ? 'خاموش' : 'روشن', $on ? 'ai:rt:off' : 'ai:rt:on', $on ? 'danger' : 'success')]];
         $rows[] = [btn(($set === '' ? '✅ ' : '') . '🔗 هم‌مدلِ چت', 'ai:rset:-:c:0', $set === '' ? 'success' : 'primary')];
         foreach (self::providers() as $id => $name) {
             $is     = $cur === $id;
@@ -166,7 +166,14 @@ final class AiPanel
         $saved = false;
 
         if ($act === 'rt') {
-            AI::setRouterOn(!AI::routerOn());
+            $target = $p[2] ?? '';
+            if ($target === 'on') {
+                AI::setRouterOn(true);
+            } elseif ($target === 'off') {
+                AI::setRouterOn(false);
+            } else {
+                AI::setRouterOn(!AI::routerOn());
+            }
             $tg->editMessage($chatId, $msgId, self::routerText(), self::routerKeyboard());
             $tg->answer($cq, AI::routerOn() ? '✅ روتر روشن شد' : '⛔ روتر خاموش شد');
             return;

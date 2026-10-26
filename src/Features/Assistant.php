@@ -23,6 +23,85 @@ final class Assistant
         'creation_time' => 'زمان ساخت فایل',
     ];
 
+    private static function decideWebSearch(string $question, array $history = []): ?string
+    {
+        $question = trim($question);
+        if ($question === '' || mb_strlen($question) < 4) {
+            return null;
+        }
+
+        $messages = [[
+            'role' => 'system',
+            'content' => "تو دستیار تصمیم‌گیری جست‌وجوی وبِ نالینی هستی. بر اساس نیاز واقعی کاربر تصمیم بگیر، نه بر اساس تطبیق کلمه‌های کلیدی. اگر پاسخ دقیق به اطلاعات جدید یا به‌روز، بررسی خبر یا ادعا، تأیید شایعه، وضعیت فعلی افراد و رویدادها، قیمت‌ها، نسخه‌های جدید، برنامه‌ها، آب‌وهوا یا اطلاعات تخصصی نامطمئن نیاز دارد، جست‌وجو را انتخاب کن. اگر کاربر صریحاً خواست در اینترنت بگردی یا منبع را بررسی کنی نیز جست‌وجو کن. برای دانش عمومیِ پایدار، ریاضی، کمک برنامه‌نویسی بر اساس کد ارائه‌شده، ترجمه، بازنویسی، نوشتن خلاقانه و گفت‌وگوی عادی، مگر اینکه بررسی بیرونی واقعاً لازم باشد، جست‌وجو نکن. اگر جست‌وجو لازم است، فقط با قالب «SEARCH: عبارت جست‌وجوی مستقل و کوتاه به زبان کاربر» پاسخ بده. اگر لازم نیست، فقط «NO_SEARCH» بنویس. به کاربر پاسخ نده و توضیح اضافه نکن."
+        ]];
+        foreach (array_slice($history, -4) as $item) {
+            if (isset($item['role'], $item['content']) && in_array($item['role'], ['user', 'assistant'], true) && is_string($item['content'])) {
+                $messages[] = ['role' => $item['role'], 'content' => mb_substr($item['content'], 0, 1200)];
+            }
+        }
+        $messages[] = ['role' => 'user', 'content' => mb_substr($question, 0, 2000)];
+
+        $decision = AI::chat($messages, [
+            'tier' => 'lite',
+            'temperature' => 0,
+            'deadline' => microtime(true) + 12,
+            'section' => 'web_search_decision',
+        ]);
+        if (!is_string($decision) || trim($decision) === '') {
+            logWarn('tavily', 'Search decision model returned no decision');
+            return null;
+        }
+        $decision = trim($decision);
+        if (!preg_match('/^SEARCH\s*:\s*(.+)$/isu', $decision, $match)) {
+            return null;
+        }
+        $query = trim(preg_replace('/\s+/u', ' ', $match[1]) ?? $match[1]);
+        return $query !== '' ? mb_substr($query, 0, 500) : null;
+    }
+
+    private static function tavilyContext(string $question, array $history = []): ?string
+    {
+        $key = trim((string) env('TAVILY_API_KEY', ''));
+        if ($key === '') {
+            return null;
+        }
+        $query = self::decideWebSearch($question, $history);
+        if ($query === null) {
+            return null;
+        }
+        $response = Http::postJson('https://api.tavily.com/search', [
+            'api_key' => $key,
+            'query' => $query,
+            'search_depth' => 'advanced',
+            'topic' => 'general',
+            'max_results' => 5,
+            'include_answer' => false,
+            'include_raw_content' => 'text',
+            'include_images' => false,
+        ], [], 18);
+        if ($response['code'] < 200 || $response['code'] >= 300 || !is_array($response['data'])) {
+            logWarn('tavily', 'Search failed: HTTP ' . $response['code']);
+            return null;
+        }
+        $results = (array) ($response['data']['results'] ?? []);
+        if (!$results) {
+            return null;
+        }
+        $lines = [];
+        foreach (array_slice($results, 0, 5) as $i => $result) {
+            if (!is_array($result)) {
+                continue;
+            }
+            $title = trim((string) ($result['title'] ?? ''));
+            $content = trim((string) ($result['raw_content'] ?? $result['content'] ?? ''));
+            if ($title === '' && $content === '') {
+                continue;
+            }
+            $lines[] = ($i + 1) . '. ' . $title . "\nمحتوا: " . mb_substr($content, 0, 3500);
+        }
+        return $lines ? implode("\n\n", $lines) : null;
+    }
+
     private static function memKey(int $chatId, int $userId): string
     {
         return "{$chatId}_{$userId}";
@@ -463,6 +542,13 @@ final class Assistant
             }
         }
 
+        if (!$service && $question !== '') {
+            $webContext = self::tavilyContext($question, $history);
+            if ($webContext !== null) {
+                $ctx['web_search_context'] = $webContext;
+            }
+        }
+
         $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
         $opt     = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res     = AI::reply($content, $ctx, $history, $opt);
@@ -472,6 +558,11 @@ final class Assistant
         }
 
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
+        if (isset($ctx['web_search_context'])) {
+            $answer = preg_replace('~https?://\S+|www\.\S+~iu', '', $answer) ?? $answer;
+            $answer = preg_replace('/[ \t]+([,،؛.!؟])/u', '$1', $answer) ?? $answer;
+            $answer = trim(preg_replace('/\n{3,}/u', "\n\n", $answer) ?? $answer);
+        }
 
         if (!$live || !$live->finish($answer)) {
             self::typing($chatId, $answer);
