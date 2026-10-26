@@ -1,16 +1,16 @@
 <?php
 
-
-
-
-
+/**
+ * نمایش زنده‌ی جواب هوش مصنوعی: همین‌طور که متن می‌رسه، یه پیام می‌فرسته و مدام ویرایشش می‌کنه.
+ * متن خام از AI::reply (گزینه‌ی on_text) می‌رسه؛ خط REACTION و دستورهای ACTION/IMAGE نمایش داده نمی‌شن.
+ */
 final class LiveReply
 {
     public const DRAWING = '🎨 دارم می‌کشمش، چند لحظه صبر کن...';
 
     private array $ids    = [];
     private array $sent   = [];
-    private string $mode  = 'wait';   
+    private string $mode  = 'wait';   // wait | live | silent
     private int $lastLen  = 0;
 
     public function __construct(private array $msg, private ?string $imid = null, private string $head = '', private bool $reaction = true)
@@ -75,7 +75,7 @@ final class LiveReply
         $this->lastLen = 0;
     }
 
-    
+    /** @return string|null|false  متن قابل نمایش، null = هنوز معلوم نیست، false = این جواب نمایش داده نمی‌شه */
     private function body(string $raw, bool $final)
     {
         $t = preg_replace('#<think>.*?</think>#si', '', $raw) ?? $raw;
@@ -103,12 +103,9 @@ final class LiveReply
             return null;
         }
 
-        
-        
-        if (preg_match('/^\s*\[\[\s*image\s*[|｜:：]/iu', $t)) {
+        if (preg_match('/^\s*\[\[\s*image(?![A-Za-z])/iu', $t)) {
             return self::DRAWING;
         }
-
         if (preg_match('/^\s*\[\[\s*(' . implode('|', Intent::NAMES) . ')(?![A-Za-z])/iu', $t)) {
             return false;
         }

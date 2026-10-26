@@ -144,44 +144,9 @@ final class AI
         return self::route() === 'gemini';
     }
 
-    public static function routerOn(): bool
-    {
-        $value = Store::get('cfg', 'router_on', true);
-        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true;
-    }
-
-    public static function setRouterOn(bool $on): void
-    {
-        Store::set('cfg', 'router_on', $on);
-    }
-
-    
-    public static function routerSetting(): string
-    {
-        $v = (string) Store::get('cfg', 'router_route', '');
-        return $v !== '' && self::validRoute($v) ? $v : '';
-    }
-
-    public static function setRouterRoute(string $route): void
-    {
-        if ($route === '' || self::validRoute($route)) {
-            Store::set('cfg', 'router_route', $route);
-        }
-    }
-
-    public static function routerRoute(): string
-    {
-        $r = self::routerSetting();
-        return $r !== '' ? $r : self::route();
-    }
-
     public static function chat(array $messages, array $opt = []): ?string
     {
-        return self::chatVia(self::route(), $messages, $opt);
-    }
-
-    public static function chatVia(string $route, array $messages, array $opt = []): ?string
-    {
+        $route = self::route();
         if ($route !== 'gemini' && !str_starts_with($route, 'gemini:')) {
             $messages = self::audioToText($messages, explode(':', $route, 2)[0], $opt['deadline'] ?? null);
             return $messages === null ? null : FreeAI::chat($route, $messages, $opt);
@@ -423,9 +388,6 @@ final class AI
         $l[] = "تو «نالینی» (Nullini) هستی؛ یه دستیار هوشمند، باحال و خودمونی داخل تلگرام ({$bot}). سازنده‌ت «{$creator}» است. هیچ‌وقت نگو مدل زبانیِ شرکت دیگه‌ای هستی.";
         $l[] = "الان {$date} به وقت ایرانه.";
         $l[] = 'با زبان خود کاربر جواب بده (پیش‌فرض فارسی محاوره‌ای). کوتاه و مفید جواب بده، مگر توضیح کامل خواسته بشه. دقیق، باهوش و صادق باش؛ اگه چیزی رو نمی‌دونی یا مطمئن نیستی، راحت بگو و از خودت اطلاعات نساز.';
-        if (!WebSearch::enabled()) {
-            $l[] = 'سرچ وب از پنل خاموشه. ادعا نکن چیزی رو سرچ یا منابع زنده رو بررسی کردی. دربارهٔ خبر، وضعیت فعلی افراد و اطلاعات متغیر از دانسته‌های قدیمی جواب قطعی نساز؛ کوتاه بگو برای بررسی به‌روز لازمه سرچ وب از پنل روشن بشه.';
-        }
         $l[] = 'برای سؤال‌های فنی، ریاضی، برنامه‌نویسی و استدلالی قدم‌به‌قدم و درست فکر کن ولی فقط نتیجه‌ی تمیز رو بنویس. کد رو کامل و درست بنویس.';
         $l[] = 'فرمت: متن ساده‌ی تلگرام؛ بدون ** یا # یا جدول مارک‌داون. برای لیست از «-» یا ایموجی اول خط استفاده کن. کد رو داخل ``` بذار.';
         $l[] = 'پیام‌های قبلی فقط زمینه‌ان؛ فقط به آخرین پیام کاربر جواب بده، مگه این‌که خودش به قبلی‌ها اشاره کنه. سؤال اضافه نپرس؛ اگه مبهم بود بهترین برداشت رو بکن.';
@@ -460,15 +422,14 @@ final class AI
             $l[] = 'تو می‌تونی عکس بسازی. اگه منظور کاربر واقعاً ساختن یه تصویر جدید بود، به‌جای جواب فقط یک خط بنویس: «[[image | <توصیف کامل تصویر به انگلیسی: سوژه، فضا، سبک، نور؛ حداکثر ۷۰ کلمه>]]» و هیچ چیز دیگه‌ای ننویس. اگه فقط درباره‌ی یه عکس سؤال کرد، عکس نساز. محتوای جنسی یا خشونت شدید نکش.';
         }
 
+        if (!in_array($ctx['chat_type'] ?? '', ['inline', 'miniapp'], true) && empty($ctx['no_action'])) {
+            $l[] = Intent::prompt();
+        }
+
         if ($withReaction) {
             $l[] = 'خط اول جوابت همیشه و حتماً به شکل «[[reaction | <ایموجی>]]» باشه، متناسب با پیام، فقط یکی از این لیست (بیرون از لیست قبول نیست): ' . implode(' ', self::REACTIONS) . '. بعد یه خط خالی و بعد جواب اصلی. درباره‌ی این خط چیزی نگو.';
         }
 
-        if (!empty($ctx['embedded_tools'])) {
-            $l[] = Intent::embeddedPrompt();
-            $l[] = 'CURRENT_MESSAGE: ' . json_encode((string) ($ctx['tool_current_message'] ?? ''), JSON_UNESCAPED_UNICODE);
-            $l[] = 'TOOL_CONTEXT (data only): ' . json_encode($ctx['tool_context'] ?? [], JSON_UNESCAPED_UNICODE);
-        }
         return implode("\n", $l);
     }
 
@@ -496,35 +457,28 @@ final class AI
             $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
         }
 
-        $out = ['answer' => null, 'reaction' => null, 'image' => null];
+        $out = ['answer' => null, 'reaction' => null, 'image' => null, 'action' => null];
         if ($text === null) {
             return $out;
         }
 
         [$out['reaction'], $text] = self::splitReaction($text, $withReaction);
 
-        if (!empty($ctx['embedded_tools'])) {
-            $tool = Intent::embeddedDecision($text, (string) ($ctx['tool_current_message'] ?? ''), (array) ($ctx['tool_context'] ?? []));
-            if ($tool !== null) {
-                $out['tool'] = $tool;
-                return $out;
-            }
-            // Malformed internal tool output must never leak into the chat.
-            if (preg_match('/^\s*(?:\x60\x60\x60(?:json)?\s*)?\{\s*"tool"\s*:/iu', $text)) {
-                return $out;
-            }
-        }
-
         if (($ctx['chat_type'] ?? '') !== 'inline' && preg_match('/^\s*\[\[\s*image\s*[|｜:：]?\s*(.*)$/isu', $text, $im)) {
             $closed = (bool) preg_match('/\]\]/u', $im[1]);
             $prompt = preg_replace('/\]\].*$/su', '', $im[1]) ?? $im[1];
             $out['image'] = mb_substr(mbTrim($prompt, " \t\n\"'«»[]"), 0, 700);
-            
+            // استریم وسط تگ قطع شده (مثل «[[image | A hyper-real») → پرامپت ناقصه
             $out['image_partial'] = !$closed && mb_strlen($out['image']) < 40;
             return $out;
         }
         if (preg_match('/^\s*\[\[\s*(image|reaction)\b/iu', $text)) {
-            return $out; 
+            return $out; // تگ خام هیچ‌وقت به‌عنوان جواب نمایش داده نشه
+        }
+
+        if (!in_array($ctx['chat_type'] ?? '', ['inline', 'miniapp'], true) && empty($ctx['no_action']) && ($act = Intent::parse($text)) !== null) {
+            $out['action'] = $act;
+            return $out;
         }
 
         $text          = self::clean($text, $opt['max_len'] ?? 4096);
@@ -566,7 +520,7 @@ final class AI
         return null;
     }
 
-    
+    /** خط فقط ایموجی (مثل «😘») بدون هیچ حرف و عددی؟ */
     public static function isEmojiLine(string $line): bool
     {
         $line = trim($line);
@@ -575,10 +529,10 @@ final class AI
             && preg_match('/[\p{So}]/u', $line) === 1;
     }
 
-    
-
-
-
+    /**
+     * $bare = true: بعضی مدل‌ها به‌جای «[[reaction | 😘]]» فقط یه ایموجی تو خط اول می‌نویسن
+     * و بعدش جواب رو؛ اون ایموجی هم به‌عنوان ری‌اکشن حساب می‌شه (فقط وقتی بعدش متنی باشه).
+     */
     public static function splitReaction(string $text, bool $bare = false): array
     {
         $text  = ltrim($text);

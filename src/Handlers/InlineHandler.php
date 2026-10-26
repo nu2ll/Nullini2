@@ -166,32 +166,29 @@ final class InlineHandler
             Downloader::guest($from, $link, $imid);
             return true;
         }
-        if (($act = Intent::decide($q)) !== null) {
-            if (GuestHandler::dispatchTool(['chat' => ['type' => 'inline'], 'message_id' => 0], $from, $act, $imid, '', $q)) {
-                return true;
-            }
-        }
         $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
-        if (!AI::routerOn() && !AI::isServiceSender($from)) {
-            $ctx['embedded_tools'] = true;
-            $ctx['tool_current_message'] = $q;
-            $ctx['tool_context'] = [];
-        }
-        $live = App::cfg('ai_stream', true) && empty($ctx['embedded_tools']) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
+        $live = App::cfg('ai_stream', true) ? new LiveReply(['chat' => ['id' => 0, 'type' => 'inline'], 'message_id' => 0], $imid, self::aiHead($q), false) : null;
         $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res  = AI::reply($q, $ctx, [], $opt);
-        if (!empty($res['tool']) && GuestHandler::dispatchTool(['chat' => ['type' => 'inline'], 'message_id' => 0], $from, $res['tool'], $imid, '', $q)) {
-            return true;
+        if (!empty($res['action'])) {
+            [$act, $arg] = $res['action'];
+            Users::hit('intent:' . $act);
+            if ($act === 'download' && ($dl = Downloader::find($arg)) !== null) {
+                Downloader::guest($from, $dl, $imid);
+                return true;
+            }
+            $o = Intent::output(['from' => $from, 'chat' => ['type' => 'inline'], 'message_id' => 0], $act, $arg, true, $imid);
+            if ($o !== null) {
+                GuestHandler::show($imid, '', $o);
+                return true;
+            }
+            $res = AI::reply($q, ['no_action' => true] + $ctx, [], $opt);
         }
         if (!empty($res['image'])) {
-            GuestHandler::image($imid, null, $res['image']);
+            GuestHandler::image($imid, null, (string) $res['image']);
             return true;
         }
         if ($res['answer'] === null) {
-            if (!empty($ctx['embedded_tools'])) {
-                App::tg()->editInline($imid, AI::FAIL_TEXT);
-                return true;
-            }
             return false;
         }
         $text = self::aiHead($q) . AI::toHtml(AI::fit($res['answer'], self::aiHead($q)));

@@ -29,31 +29,15 @@ final class Search
     public static function results(string $q, int $limit = 6): array
     {
         $q = trim($q);
-        $limit = max(1, min(10, $limit));
-        if (mb_strlen($q) < 2 || !WebSearch::enabled()) {
+        if (mb_strlen($q) < 2) {
             return [];
         }
-        $provider = trim((string) env('TAVILY_API_KEY', '')) !== '' ? 'tavily' : 'ddg';
-        $list = Store::remember('cache', 'search_v2_' . md5($provider . ':' . $limit . ':' . mb_strtolower($q)), 120, static fn() => self::fetch($q, $limit));
+        $list = Store::remember('cache', 'search_' . md5(mb_strtolower($q)), 3600, static fn() => self::fetch($q, $limit));
         return is_array($list) ? array_slice($list, 0, $limit) : [];
     }
 
     public static function fetch(string $q, int $limit): ?array
     {
-        if (!WebSearch::enabled()) {
-            return [];
-        }
-        // Use the same retrieval layer for explicit search and conversational answers.
-        // The free HTML fallback remains available when Tavily is not configured/down.
-        if (trim((string) env('TAVILY_API_KEY', '')) !== '') {
-            $retrieved = WebSearch::retrieve(['query' => mb_substr(trim($q), 0, 450), 'verify' => false]);
-            if ($retrieved['status'] === 'ok') {
-                return array_map(static fn($s) => [
-                    'title' => $s['title'], 'url' => $s['url'],
-                    'snippet' => mb_substr($s['content'], 0, 300),
-                ], array_slice($retrieved['sources'], 0, max(1, min(10, $limit))));
-            }
-        }
         $r = Http::request('GET', 'https://html.duckduckgo.com/html/?' . http_build_query(['q' => $q, 'kl' => 'wt-wt']), [
             'headers'         => ['Accept: text/html', 'Accept-Language: fa,en;q=0.8', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'],
             'timeout'         => 6,
@@ -64,10 +48,9 @@ final class Search
         }
 
         $dom = new DOMDocument();
-        $previousErrors = libxml_use_internal_errors(true);
+        libxml_use_internal_errors(true);
         $dom->loadHTML('<?xml encoding="utf-8"?>' . $r['body']);
         libxml_clear_errors();
-        libxml_use_internal_errors($previousErrors);
         $xp  = new DOMXPath($dom);
         $out = [];
         foreach ($xp->query("//div[contains(concat(' ', normalize-space(@class), ' '), ' result ')]") ?: [] as $node) {
@@ -84,10 +67,7 @@ final class Search
                 parse_str((string) parse_url($href, PHP_URL_QUERY), $qs);
                 $href = (string) ($qs['uddg'] ?? '');
             }
-            if (!WebSearch::validUrl($href) || str_contains($href, 'duckduckgo.com/y.js')) {
-                continue;
-            }
-            if (in_array($href, array_column($out, 'url'), true)) {
+            if (!preg_match('#^https?://#i', $href) || str_contains($href, 'duckduckgo.com/y.js')) {
                 continue;
             }
             $sn    = $xp->query(".//*[contains(@class, 'result__snippet')]", $node)->item(0);

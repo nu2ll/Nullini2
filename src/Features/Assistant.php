@@ -32,8 +32,8 @@ final class Assistant
     {
         $m = Store::get('ai_memory', self::memKey($chatId, $userId));
         $msgs = is_array($m) && ($m['day'] ?? '') === date('Y-m-d') ? ($m['messages'] ?? []) : [];
-        
-        return array_values(array_filter($msgs, static fn($x) => !preg_match('/یه عکس براش ساختم|\[\[\s*image/u', (string) ($x['content'] ?? ''))));
+        // قالب قدیمی «[یه عکس براش ساختم: ...]» از حافظه حذف می‌شه
+        return array_values(array_filter($msgs, static fn($x) => !str_contains((string) ($x['content'] ?? ''), 'یه عکس براش ساختم')));
     }
 
     private static function remember(int $chatId, int $userId, string $user, string $assistant): void
@@ -97,7 +97,7 @@ final class Assistant
         return is_array($t) ? ($t['file_id'] ?? null) : null;
     }
 
-    
+    /** true وقتی فقط یه فریم (تامبنیل) از پیام به هوش مصنوعی می‌رسه: استیکر متحرک/ویدیویی، گیف، ویدیو، ویدیونوت */
     public static function isFrame(array $m): bool
     {
         if (isset($m['photo'])) {
@@ -110,7 +110,7 @@ final class Assistant
         return (isset($m['animation']) || isset($m['video']) || isset($m['video_note'])) && self::frameId($m) !== null;
     }
 
-    
+    /** نوت‌های «[کاربر ...]» که پیام بخشی از یه آلبوم چندتاییه (media_group_id) */
     public static function withAlbum(string $note, array $m): string
     {
         if (empty($m['media_group_id']) || !str_starts_with($note, '[کاربر') || !str_ends_with($note, ']')) {
@@ -289,34 +289,6 @@ final class Assistant
         return null;
     }
 
-    private static function routeKind(array $m): string
-    {
-        return match (true) {
-            isset($m['photo'])                            => 'photo',
-            isset($m['voice'])                            => 'voice message',
-            isset($m['audio'])                            => 'music file',
-            isset($m['sticker'])                          => 'sticker',
-            isset($m['animation'])                        => 'gif',
-            isset($m['video']) || isset($m['video_note']) => 'video',
-            isset($m['document'])                         => 'file',
-            isset($m['poll'])                             => 'poll',
-            isset($m['venue']) || isset($m['location'])   => 'location',
-            default                                       => '',
-        };
-    }
-
-    public static function routeContext(array $msg, array $history = []): array
-    {
-        $reply = $msg['reply_to_message'] ?? null;
-        return [
-            'attach'     => self::routeKind($msg),
-            'reply_kind' => is_array($reply) ? self::routeKind($reply) : '',
-            'reply_text' => is_array($reply) ? trim((string) ($reply['text'] ?? $reply['caption'] ?? '')) : '',
-            'reply_bot'  => !empty($reply['from']['is_bot']),
-            'history'    => $history,
-        ];
-    }
-
     public static function kind(array $m): string
     {
         return match (true) {
@@ -344,33 +316,17 @@ final class Assistant
         usleep((int) ($seconds * 1_000_000));
     }
 
-    private static function send(array $msg, string $answer, array $sources = []): void
+    private static function send(array $msg, string $answer): void
     {
         $tg = App::tg();
-        // Reserve visible space for citations and keep HTML out of plain fallback.
-        $sources = array_values(array_filter(array_slice($sources, 0, 3), static fn($s) => is_array($s) && WebSearch::validUrl((string) ($s['url'] ?? ''))));
-        $parts = AI::chunks($answer, $sources ? 2900 : 4096);
-        $lastIndex = count($parts) - 1;
-        foreach ($parts as $i => $part) {
-            $html = AI::toHtml($part);
-            $plain = $part;
-            if ($i === $lastIndex && $sources) {
-                $links = [];
-                foreach ($sources as $n => $source) {
-                    $title = mb_substr((string) ($source['title'] ?? 'منبع'), 0, 150);
-                    $links[] = '<a href="' . h($source['url']) . '">' . h($title) . '</a>';
-                    $plain .= "\n\nمنبع " . ($n + 1) . ': ' . $title . ' — ' . $source['url'];
-                }
-                $html .= "\n\n🔎 <b>منبع" . (count($links) > 1 ? '‌ها' : '') . ":</b>\n" . implode("\n", $links);
-            }
-            $r = $tg->reply($msg, $html);
+        foreach (AI::chunks($answer) as $part) {
+            $r = $tg->reply($msg, AI::toHtml($part));
             if (empty($r['ok'])) {
-                foreach (AI::chunks($plain, 4000) as $fallback) {
-                    $tg->call('sendMessage', [
-                        'chat_id' => $msg['chat']['id'], 'text' => $fallback,
-                        'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
-                    ]);
-                }
+                $tg->call('sendMessage', [
+                    'chat_id'          => $msg['chat']['id'],
+                    'text'             => mb_substr($part, 0, 4096),
+                    'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
+                ]);
             }
         }
     }
@@ -402,10 +358,9 @@ final class Assistant
             }
         }
 
-        $parts     = [];
-        $notes     = [];
-        $log       = $question;
-        $voiceText = '';
+        $parts = [];
+        $notes = [];
+        $log   = $question;
 
         $reply = $msg['reply_to_message'] ?? null;
         $n0    = count($notes);
@@ -440,9 +395,6 @@ final class Assistant
             if ($media) {
                 $parts[] = $media;
             }
-            if ($media && $question === '' && isset($msg['voice']) && !$service) {
-                $voiceText = trim((string) AI::transcribe((string) base64_decode((string) $media['data']), (string) $media['mime']));
-            }
             $isVoice = isset($msg['voice']);
             $notes[] = $data !== null
                 ? "[کاربر یه {$data[0]} فرستاده؛ {$data[1]}]"
@@ -451,7 +403,7 @@ final class Assistant
                 : ($isVoice
                     ? '[کاربر ویس فرستاده؛ گوش بده و دقیقاً به حرفش جواب بده، انگار متنی پرسیده]'
                     : (isset($msg['photo']) ? '[کاربر عکس فرستاده؛ ببینش و جواب بده]' : '[کاربر ' . self::kind($msg) . ' فرستاده؛ ' . (self::isFrame($msg) ? 'فقط عکسِ فریم اولش پیوست شده' : 'عکسش پیوست شده') . '، ببینش و جواب بده]')));
-            $log = '[' . self::kind($msg) . '] ' . ($question !== '' ? $question : $voiceText);
+            $log = '[' . self::kind($msg) . '] ' . $question;
             if (count($notes) > $n1) {
                 $notes[$n1] = self::withAlbum($notes[$n1], $msg);
             }
@@ -467,59 +419,41 @@ final class Assistant
         }
 
         $history = $service ? [] : self::history($chatId, $userId);
-
-        if (!$service && ($act = Intent::decide($question !== '' ? $question : $voiceText, self::routeContext($msg, $history))) !== null) {
-            [$name, $arg] = $act;
-            if ($name === 'image' && $arg === '') {
-                $arg = $voiceText;
-            }
-            if (Intent::run($msg, $name, $arg)) {
-                self::remember($chatId, $userId, $log, '[' . $name . ($arg !== '' ? ': ' . $arg : '') . ' رو براش انجام دادم]');
-                return;
-            }
-        }
-
-        $request = $question !== '' ? $question : $voiceText;
-        $routeCtx = self::routeContext($msg, $history);
-        if (!$service && !AI::routerOn()) {
-            $ctx['embedded_tools'] = true;
-            $ctx['tool_current_message'] = $request;
-            $ctx['tool_context'] = $routeCtx;
-        }
-
-        // Finish retrieval, answer validation and citation selection before sending anything.
-        // Include replied-to text for self-contained follow-ups, but never treat it as evidence.
-        $searchQuestion = $request;
-        $replyText = trim((string) ($reply['text'] ?? $reply['caption'] ?? ''));
-        if ($replyText !== '') {
-            $searchQuestion = "[پیام مورد ریپلای؛ فقط زمینه، نه مدرک]\n" . mb_substr($replyText, 0, 1500) . "\n[سؤال فعلی]\n" . $request;
-        }
-        if (!$service && $request !== '' && ($plan = WebSearch::plan($searchQuestion, $history)) !== null) {
-            $web = WebSearch::answer($searchQuestion, $ctx, $history, $plan, WebSearch::retrieve($plan));
-            self::send($msg, $web['answer'], $web['sources']);
-            // Failed verification is not a fact to reinforce in subsequent history.
-            if ($web['sources']) {
-                self::remember($chatId, $userId, $log, $web['answer']);
-            }
-            return;
-        }
-
-        $live = App::cfg('ai_stream', true) && empty($ctx['embedded_tools']) ? new LiveReply($msg) : null;
-        $opt = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
-        $res = AI::reply($content, $ctx, $history, $opt);
-        if (!empty($res['tool'])) {
-            [$name, $arg] = $res['tool'];
-            if (Intent::run($msg, $name, $arg)) {
-                self::remember($chatId, $userId, $log, '[' . $name . ' رو براش انجام دادم]');
-                return;
-            }
-        }
+        $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
+        $opt     = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $res     = AI::reply($content, $ctx, $history, $opt);
 
         if ($res['reaction'] !== null) {
             $tg->react($chatId, (int) $msg['message_id'], $res['reaction']);
         }
 
+        if (!empty($res['action'])) {
+            $live?->discard();
+            [$act, $arg] = $res['action'];
+            if (Intent::run($msg, $act, $arg)) {
+                if (!$service) {
+                    self::remember($chatId, $userId, $log, '[' . $act . ($arg !== '' ? ': ' . $arg : '') . ' رو براش انجام دادم]');
+                }
+                return;
+            }
+            $res = AI::reply($content, ['no_action' => true] + $ctx, $history, $opt);
+        }
+
+        if (!empty($res['image']) || !empty($res['image_partial'])) {
+            Users::hit('image');
+            $caption = null;
+            if (!empty($res['image_partial'])) {
+                $plan = AI::imagePrompt($question !== '' ? $question : (string) ($msg['text'] ?? ''));
+                $res['image'] = $plan['prompt'] ?? (AI::googleTranslate($question, 'English') ?? $question);
+                $caption      = $plan['caption'] ?? null;
+            }
+            if (ImageGen::draw($msg, $res['image'], $caption, $live) && !$service) {
+                self::remember($chatId, $userId, $log, '[[image | ' . mb_substr($res['image'], 0, 200) . ']]');
+            }
+            return;
+        }
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
+
         if (!$live || !$live->finish($answer)) {
             self::typing($chatId, $answer);
             self::send($msg, $answer);

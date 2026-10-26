@@ -32,6 +32,35 @@ final class ImageGen
         return $chat === '' ? null : App::tg()->photoFileId($chat, $bytes);
     }
 
+    private static function topTools(string $prompt, callable $tick): ?string
+    {
+        $keys = FreeAI::keys('toptools');
+        if (!$keys) {
+            return null;
+        }
+        $key = $keys[array_rand($keys)];
+        $tick();
+        $r = Http::postJson(
+            FreeAI::PROVIDERS['toptools']['url'] . '/chat/completions',
+            [
+                'model'    => App::cfg('image_toptools_model', 'top-tools-ai'),
+                'messages' => [['role' => 'user', 'content' => 'Generate an image: ' . $prompt]],
+            ],
+            ['Authorization: Bearer ' . $key],
+            120
+        );
+        $text = (string) ($r['data']['choices'][0]['message']['content'] ?? '');
+        if ($r['code'] === 200 && trim($text) !== '' && !preg_match('~https?://[^\s)\]>"\']+~u', $text)) {
+            self::$notice = trim($text);
+            return null;
+        }
+        if ($r['code'] !== 200 || !preg_match('~https?://[^\s)\]>"\']+~u', $text, $m)) {
+            logWarn('image', "toptools failed (HTTP {$r['code']}): " . mb_substr((string) ($r['data']['error']['message'] ?? $text ?: $r['raw']), 0, 160));
+            return null;
+        }
+        return self::fetch($m[0], '', $tick);
+    }
+
     private static function cloudflare(string $prompt, callable $tick): ?string
     {
         $account = trim((string) App::cfg('cloudflare_account_id', ''));
@@ -67,12 +96,27 @@ final class ImageGen
         return null;
     }
 
+    private static function useTopTools(): bool
+    {
+        $model = (string) App::cfg('image_toptools_model', 'top-tools-ai');
+        return strcasecmp(AI::route(), 'toptools:' . $model) === 0;
+    }
+
     public static function generate(string $prompt, callable $tick): ?string
     {
-        
+        // ترتیب: تاپ‌تولز (فقط وقتی مدل فعال پنل همون باشه) ← کلادفلر Flux
         self::$notice   = null;
         self::$failMsg  = null;
         self::$quotaOut = false;
+        if (self::useTopTools()) {
+            $bytes = self::topTools($prompt, $tick);
+            if ($bytes !== null) {
+                return $bytes;
+            }
+            if (self::$notice !== null) {
+                return null;
+            }
+        }
         return self::cloudflare($prompt, $tick);
     }
 
@@ -142,11 +186,6 @@ final class ImageGen
         if ($statusId !== null) {
             App::tg()->call('deleteMessage', ['chat_id' => $chatId, 'message_id' => $statusId], 8);
         }
-    }
-
-    public static function englishPrompt(string $request): string
-    {
-        return AI::googleTranslate($request, 'English') ?? (AI::imagePrompt($request)['prompt'] ?? $request);
     }
 
     public static function handle(array $msg, string $request): void
