@@ -2,8 +2,6 @@
 
 final class Assistant
 {
-    private static ?array $webSource = null;
-
     private const TAGS = [
         'title'         => 'عنوان',
         'artist'        => 'خواننده',
@@ -24,134 +22,6 @@ final class Assistant
         'lyrics'        => 'متن آهنگ',
         'creation_time' => 'زمان ساخت فایل',
     ];
-
-    private static function decideWebSearch(string $question, array $history = []): ?string
-    {
-        $question = trim($question);
-        if ($question === '' || mb_strlen($question) < 4) {
-            return null;
-        }
-
-        $messages = [[
-            'role' => 'system',
-            'content' => "تو دستیار تصمیم‌گیری جست‌وجوی وبِ نالینی هستی. بر اساس نیاز واقعی کاربر تصمیم بگیر، نه بر اساس تطبیق کلمه‌های کلیدی. اگر پاسخ دقیق به اطلاعات جدید یا به‌روز، بررسی خبر یا ادعا، تأیید شایعه، وضعیت فعلی افراد و رویدادها، قیمت‌ها، نسخه‌های جدید، برنامه‌ها، آب‌وهوا یا اطلاعات تخصصی نامطمئن نیاز دارد، جست‌وجو را انتخاب کن. اگر کاربر صریحاً خواست در اینترنت بگردی یا منبع را بررسی کنی نیز جست‌وجو کن. برای دانش عمومیِ پایدار، ریاضی، کمک برنامه‌نویسی بر اساس کد ارائه‌شده، ترجمه، بازنویسی، نوشتن خلاقانه و گفت‌وگوی عادی، مگر اینکه بررسی بیرونی واقعاً لازم باشد، جست‌وجو نکن. اگر جست‌وجو لازم است، فقط با قالب «SEARCH: عبارت جست‌وجوی مستقل و کوتاه به زبان کاربر» پاسخ بده. اگر لازم نیست، فقط «NO_SEARCH» بنویس. به کاربر پاسخ نده و توضیح اضافه نکن."
-        ]];
-        foreach (array_slice($history, -4) as $item) {
-            if (isset($item['role'], $item['content']) && in_array($item['role'], ['user', 'assistant'], true) && is_string($item['content'])) {
-                $messages[] = ['role' => $item['role'], 'content' => mb_substr($item['content'], 0, 1200)];
-            }
-        }
-        $messages[] = ['role' => 'user', 'content' => mb_substr($question, 0, 2000)];
-
-        $decision = AI::chat($messages, [
-            'tier' => 'lite',
-            'temperature' => 0,
-            'deadline' => microtime(true) + 12,
-            'section' => 'web_search_decision',
-        ]);
-        if (!is_string($decision) || trim($decision) === '') {
-            logWarn('tavily', 'Search decision model returned no decision');
-            return null;
-        }
-        $decision = trim($decision);
-        if (!preg_match('/^SEARCH\s*:\s*(.+)$/isu', $decision, $match)) {
-            return null;
-        }
-        $query = trim(preg_replace('/\s+/u', ' ', $match[1]) ?? $match[1]);
-        return $query !== '' ? mb_substr($query, 0, 500) : null;
-    }
-
-    private static function tavilyContext(string $question, array $history = []): ?string
-    {
-        self::$webSource = null;
-        $key = trim((string) env('TAVILY_API_KEY', ''));
-        if ($key === '') {
-            return null;
-        }
-        $query = self::decideWebSearch($question, $history);
-        if ($query === null) {
-            return null;
-        }
-        $response = Http::postJson('https://api.tavily.com/search', [
-            'api_key' => $key,
-            'query' => $query,
-            'search_depth' => 'advanced',
-            'topic' => 'general',
-            'max_results' => 10,
-            'include_answer' => false,
-            'include_raw_content' => 'text',
-            'include_images' => false,
-        ], [], 18);
-        if ($response['code'] < 200 || $response['code'] >= 300 || !is_array($response['data'])) {
-            logWarn('tavily', 'Search failed: HTTP ' . $response['code']);
-            return null;
-        }
-        $results = (array) ($response['data']['results'] ?? []);
-        if (!$results) {
-            return null;
-        }
-        // Tavily already ranks results; reinforce relevance and prefer distinct domains.
-        $ranked = [];
-        $queryTerms = array_values(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($query)) ?: [], static fn($w) => mb_strlen($w) > 1));
-        foreach ($results as $result) {
-            if (!is_array($result)) {
-                continue;
-            }
-            $title = trim((string) ($result['title'] ?? ''));
-            $content = trim((string) ($result['raw_content'] ?? $result['content'] ?? ''));
-            $url = trim((string) ($result['url'] ?? ''));
-            if (($title === '' && $content === '') || !filter_var($url, FILTER_VALIDATE_URL) || !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
-                continue;
-            }
-            $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-            $host = preg_replace('/^www\./', '', $host) ?? $host;
-            $haystack = mb_strtolower($title . ' ' . mb_substr($content, 0, 1800) . ' ' . $host);
-            $matches = 0;
-            foreach ($queryTerms as $term) {
-                if (mb_strpos($haystack, $term) !== false) {
-                    $matches++;
-                }
-            }
-            $tavilyScore = (float) ($result['score'] ?? 0);
-            $overlap = count($queryTerms) ? $matches / count($queryTerms) : 0;
-            $ranked[] = [
-                'title' => $title !== '' ? $title : $host,
-                'content' => $content,
-                'url' => $url,
-                'host' => $host,
-                'score' => ($tavilyScore * 0.72) + ($overlap * 0.28),
-                'raw_score' => $tavilyScore,
-            ];
-        }
-        usort($ranked, static fn($a, $b) => $b['score'] <=> $a['score']);
-        // Keep the strongest result per domain so one site cannot crowd out the others.
-        $unique = [];
-        $seenHosts = [];
-        foreach ($ranked as $item) {
-            if (isset($seenHosts[$item['host']])) {
-                continue;
-            }
-            $seenHosts[$item['host']] = true;
-            $unique[] = $item;
-            if (count($unique) >= 10) {
-                break;
-            }
-        }
-        if (!$unique) {
-            return null;
-        }
-        // Only cite the top-ranked relevant result, and only if it has meaningful relevance.
-        $best = $unique[0];
-        if ($best['raw_score'] < 0.15 && $best['score'] < 0.25) {
-            return null;
-        }
-        self::$webSource = ['title' => $best['title'], 'url' => $best['url']];
-        $lines = [];
-        foreach ($unique as $i => $result) {
-            $lines[] = ($i + 1) . '. عنوان: ' . $result['title'] . "\nدامنه: " . $result['host'] . "\nامتیاز ارتباط: " . number_format($result['score'], 2) . "\nمحتوا: " . mb_substr($result['content'], 0, 3500);
-        }
-        return implode("\n\n", $lines);
-    }
 
     private static function memKey(int $chatId, int $userId): string
     {
@@ -474,31 +344,33 @@ final class Assistant
         usleep((int) ($seconds * 1_000_000));
     }
 
-    private static function send(array $msg, string $answer, ?array $source = null): void
+    private static function send(array $msg, string $answer, array $sources = []): void
     {
         $tg = App::tg();
-        $parts = AI::chunks($answer);
+        // Reserve visible space for citations and keep HTML out of plain fallback.
+        $sources = array_values(array_filter(array_slice($sources, 0, 3), static fn($s) => is_array($s) && WebSearch::validUrl((string) ($s['url'] ?? ''))));
+        $parts = AI::chunks($answer, $sources ? 2900 : 4096);
         $lastIndex = count($parts) - 1;
         foreach ($parts as $i => $part) {
             $html = AI::toHtml($part);
-            if ($i === $lastIndex && $source !== null && !empty($source['url']) && !empty($source['title'])) {
-                $url = (string) $source['url'];
-                if (filter_var($url, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
-                    $html .= "\n\n🔎 <b>منبع:</b> <a href=\"" . h($url) . "\">" . h((string) $source['title']) . "</a>";
+            $plain = $part;
+            if ($i === $lastIndex && $sources) {
+                $links = [];
+                foreach ($sources as $n => $source) {
+                    $title = mb_substr((string) ($source['title'] ?? 'منبع'), 0, 150);
+                    $links[] = '<a href="' . h($source['url']) . '">' . h($title) . '</a>';
+                    $plain .= "\n\nمنبع " . ($n + 1) . ': ' . $title . ' — ' . $source['url'];
                 }
+                $html .= "\n\n🔎 <b>منبع" . (count($links) > 1 ? '‌ها' : '') . ":</b>\n" . implode("\n", $links);
             }
             $r = $tg->reply($msg, $html);
             if (empty($r['ok'])) {
-                // Safe plain-text fallback: Telegram auto-links the single source URL.
-                $plain = $part;
-                if ($i === $lastIndex && $source !== null && !empty($source['url'])) {
-                    $plain .= "\n\nمنبع: " . (string) ($source['title'] ?? 'منبع') . ' — ' . (string) $source['url'];
+                foreach (AI::chunks($plain, 4000) as $fallback) {
+                    $tg->call('sendMessage', [
+                        'chat_id' => $msg['chat']['id'], 'text' => $fallback,
+                        'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
+                    ]);
                 }
-                $tg->call('sendMessage', [
-                    'chat_id'          => $msg['chat']['id'],
-                    'text'             => mb_substr($plain, 0, 4096),
-                    'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
-                ]);
             }
         }
     }
@@ -607,35 +479,50 @@ final class Assistant
             }
         }
 
-        if (!$service && $question !== '') {
-            $webContext = self::tavilyContext($question, $history);
-            if ($webContext !== null) {
-                $ctx['web_search_context'] = $webContext;
-            }
+        $request = $question !== '' ? $question : $voiceText;
+        $routeCtx = self::routeContext($msg, $history);
+        if (!$service && !AI::routerOn()) {
+            $ctx['embedded_tools'] = true;
+            $ctx['tool_current_message'] = $request;
+            $ctx['tool_context'] = $routeCtx;
         }
 
-        $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
-        $opt     = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
-        $res     = AI::reply($content, $ctx, $history, $opt);
+        // Finish retrieval, answer validation and citation selection before sending anything.
+        // Include replied-to text for self-contained follow-ups, but never treat it as evidence.
+        $searchQuestion = $request;
+        $replyText = trim((string) ($reply['text'] ?? $reply['caption'] ?? ''));
+        if ($replyText !== '') {
+            $searchQuestion = "[پیام مورد ریپلای؛ فقط زمینه، نه مدرک]\n" . mb_substr($replyText, 0, 1500) . "\n[سؤال فعلی]\n" . $request;
+        }
+        if (!$service && $request !== '' && ($plan = WebSearch::plan($searchQuestion, $history)) !== null) {
+            $web = WebSearch::answer($searchQuestion, $ctx, $history, $plan, WebSearch::retrieve($plan));
+            self::send($msg, $web['answer'], $web['sources']);
+            // Failed verification is not a fact to reinforce in subsequent history.
+            if ($web['sources']) {
+                self::remember($chatId, $userId, $log, $web['answer']);
+            }
+            return;
+        }
+
+        $live = App::cfg('ai_stream', true) && empty($ctx['embedded_tools']) ? new LiveReply($msg) : null;
+        $opt = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
+        $res = AI::reply($content, $ctx, $history, $opt);
+        if (!empty($res['tool'])) {
+            [$name, $arg] = $res['tool'];
+            if (Intent::run($msg, $name, $arg)) {
+                self::remember($chatId, $userId, $log, '[' . $name . ' رو براش انجام دادم]');
+                return;
+            }
+        }
 
         if ($res['reaction'] !== null) {
             $tg->react($chatId, (int) $msg['message_id'], $res['reaction']);
         }
 
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
-        $source = null;
-        if (isset($ctx['web_search_context'])) {
-            $answer = preg_replace('~https?://[^\s<>]+|www\.[^\s<>]+~iu', '', $answer) ?? $answer;
-            $answer = preg_replace('/[ \t]+([,،؛.!؟])/u', '$1', $answer) ?? $answer;
-            $answer = trim(preg_replace('/\n{3,}/u', "\n\n", $answer) ?? $answer);
-            $source = self::$webSource;
-            // Avoid streaming a partial answer before the final source link can be attached.
-            $live = null;
-        }
-
         if (!$live || !$live->finish($answer)) {
             self::typing($chatId, $answer);
-            self::send($msg, $answer, $source);
+            self::send($msg, $answer);
         }
 
         if ($res['answer'] !== null && !$service) {

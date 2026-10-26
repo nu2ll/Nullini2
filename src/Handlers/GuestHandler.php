@@ -24,7 +24,8 @@ final class GuestHandler
             return;
         }
 
-        $link = $q !== '' ? Downloader::match($q) : ($rt !== '' ? Downloader::match($rt) : null);
+        // A replied-to link is context, not by itself a request to download it.
+        $link = $q !== '' ? Downloader::match($q) : null;
         if ($link !== null) {
             $imid = self::send($qid, '🔎 دارم لینک ' . $link['name'] . ' رو بررسی می‌کنم...');
             if ($imid !== null) {
@@ -36,22 +37,9 @@ final class GuestHandler
 
         $imid = self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
 
-        if (($act = Intent::decide($q, Assistant::routeContext($msg))) !== null) {
-            [$name, $arg] = $act;
-            Users::hit('intent:' . $name);
-            if ($name === 'image' && $imid !== null) {
-                self::image($imid, $qid, ImageGen::englishPrompt($arg !== '' ? $arg : $q));
-                return;
-            }
-            if ($name === 'download' && ($dl = Downloader::find($arg . ' ' . $rt)) !== null && $imid !== null) {
-                Downloader::guest($from, $dl, $imid);
-                return;
-            }
-            $o = Intent::output(['from' => $from] + $msg, $name, $arg, true, $imid);
-            if ($o !== null) {
-                self::show($imid, $qid, $o);
-                return;
-            }
+        $routeCtx = Assistant::routeContext($msg);
+        if (($act = Intent::decide($q, $routeCtx)) !== null && self::dispatchTool($msg, $from, $act, $imid, $qid, $q)) {
+            return;
         }
 
         $parts = [];
@@ -91,19 +79,64 @@ final class GuestHandler
         $content = $parts ? array_merge($parts, [['type' => 'text', 'text' => $body ?: 'سلام']]) : ($body ?: 'سلام');
 
         $ctx  = ['user_name' => userName($from), 'chat_type' => 'guest'];
-        $live = $imid !== null && App::cfg('ai_stream', true) ? new LiveReply($msg, $imid, '', false) : null;
+        if (!AI::routerOn() && !AI::isServiceSender($from, $msg['sender_chat'] ?? null)) {
+            $ctx['embedded_tools'] = true;
+            $ctx['tool_current_message'] = $q;
+            $ctx['tool_context'] = $routeCtx;
+        }
+        $searchQuestion = $q;
+        if ($rt !== '') {
+            $searchQuestion = "[پیام مورد ریپلای؛ فقط زمینه، نه مدرک]\n" . mb_substr($rt, 0, 1500) . "\n[سؤال فعلی]\n" . $q;
+        }
+        if ($q !== '' && !AI::isServiceSender($from, $msg['sender_chat'] ?? null) && ($plan = WebSearch::plan($searchQuestion, [])) !== null) {
+            $web = WebSearch::answer($searchQuestion, $ctx, [], $plan, WebSearch::retrieve($plan));
+            $formatted = WebSearch::format($web, 3900);
+            self::edit($imid, $qid, $formatted['html'], $formatted['plain']);
+            return;
+        }
+        $live = $imid !== null && App::cfg('ai_stream', true) && empty($ctx['embedded_tools']) ? new LiveReply($msg, $imid, '', false) : null;
         $opt  = ['reaction' => false] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res  = AI::reply($content, $ctx, [], $opt);
 
-        if ($res['answer'] === null && $parts) {
+        if ($res['answer'] === null && empty($res['tool']) && empty($res['image']) && $parts) {
             logWarn('guest', 'reply with media failed, retrying text-only');
             $note = '[کاربر به یه عکس یا ویس اشاره کرده ولی تو به محتواش دسترسی نداری؛ اگه سؤالش به اون بستگی داره، مؤدبانه بگو تو این چت فایل رو نمی‌بینی و بهتره تو پیوی برات بفرسته]';
             $res  = AI::reply(trim($note . ($rt !== '' ? "\n[متن پیام ریپلای‌شده]: {$rt}" : '') . ($q !== '' ? "\n\n{$q}" : '')), $ctx, [], $opt);
         }
 
+        if (!empty($res['tool']) && self::dispatchTool($msg, $from, $res['tool'], $imid, $qid, $q)) {
+            return;
+        }
+        if (!empty($res['image'])) {
+            self::image($imid, $qid, $res['image']);
+            return;
+        }
+
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
         $html   = AI::toHtml(AI::fit($answer));
         self::edit($imid, $qid, $html, $answer);
+    }
+
+    /** Shared execution path for both preliminary and main-response tool decisions. */
+    public static function dispatchTool(array $msg, array $from, array $act, ?string $imid, string $qid = '', string $q = ''): bool
+    {
+        [$name, $arg] = $act;
+        Users::hit('intent:' . $name);
+        if ($name === 'image' && $imid !== null) {
+            self::image($imid, $qid !== '' ? $qid : null, ImageGen::englishPrompt($arg !== '' ? $arg : $q));
+            return true;
+        }
+        $rt = (string) ($msg['reply_to_message']['text'] ?? $msg['reply_to_message']['caption'] ?? '');
+        if ($name === 'download' && ($dl = Downloader::find($arg . ' ' . $rt)) !== null && $imid !== null) {
+            Downloader::guest($from, $dl, $imid);
+            return true;
+        }
+        $o = Intent::output(['from' => $from] + $msg, $name, $arg, true, $imid);
+        if ($o === null) {
+            return false;
+        }
+        self::show($imid, $qid, $o);
+        return true;
     }
 
     public static function image(?string $imid, ?string $qid, string $prompt): void

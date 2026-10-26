@@ -43,7 +43,9 @@ final class AiPanel
         $cur = AI::route();
         return "<b>🤖 پنل هوش مصنوعی</b>\n\n"
             . "مدل فعال روی همه‌ی بخش‌ها:\n<b>" . bidi(h(self::label($cur))) . "</b>\n\n"
-            . "🧭 روتر (تشخیص ابزار از روی حرف): <b>" . (AI::routerOn() ? 'روشن' : 'خاموش') . "</b>";
+            . "🧭 روتر جداگانه (تشخیص ابزار): <b>" . (AI::routerOn() ? 'روشن' : 'خاموش') . "</b>\n"
+            . "🔎 وضعیت فعلی سرچ وب: <b>" . (WebSearch::enabled() ? 'روشن ✅' : 'خاموش ❌') . "</b>\n"
+            . "کلید سرویس سرچ: " . (trim((string) env('TAVILY_API_KEY', '')) !== '' ? 'تنظیم شده ✅' : 'تنظیم نشده ⚠️ (سرچ زنده در دسترس نیست)');
     }
 
     public static function keyboard(): array
@@ -55,15 +57,19 @@ final class AiPanel
             $rows[] = [btn(($on ? '✅ ' : '') . $name . ' ▸', "ai:p:{$id}:0", $on ? 'success' : 'primary')];
         }
         $rows[] = [btn('🧭 روتر ▸', 'ai:r', null)];
+        $web = WebSearch::enabled();
+        $rows[] = [btn($web ? '⛔ خاموش کردن سرچ وب' : '✅ روشن کردن سرچ وب', $web ? 'ai:web:0' : 'ai:web:1', $web ? 'danger' : 'success')];
         return ikb($rows);
     }
 
     public static function routerText(): string
     {
         $set = AI::routerSetting();
-        return "وضعیت: " . (AI::routerOn() ? 'روشن ✅' : 'خاموش ❌') . "\n"
+        return "🧭 وضعیت فعلی روتر جداگانه: <b>" . (AI::routerOn() ? 'روشن ✅' : 'خاموش ❌') . "</b>\n"
             . "مدل روتر: ⁨<b>" . ($set === '' ? 'هم‌مدلِ چت' : bidi(h(self::label($set)))) . "</b>⁩"
-            . "\n\n💡 روتر برای هر پیام یه تماس اضافه می‌زنه؛\nیه مدل سبک و سریع براش بهتره.";
+            . "\n\n💡 روشن: تشخیص ابزار با یک تماس جداگانه به مدل روتر."
+            . "\nخاموش: ابزارها همچنان فعال‌اند؛ درخواست‌های مستقیم محلی و بقیه با مدل اصلی چت تشخیص داده می‌شن، بدون تماس جداگانه‌ی روتر."
+            . "\nدکمه‌ی زیر <b>عمل تغییر وضعیت</b> رو نشون می‌ده، نه وضعیت فعلی.";
     }
 
     public static function routerKeyboard(): array
@@ -71,7 +77,7 @@ final class AiPanel
         $on   = AI::routerOn();
         $set  = AI::routerSetting();
         $cur  = $set === '' ? '' : explode(':', $set, 2)[0];
-        $rows = [[btn($on ? 'خاموش' : 'روشن', $on ? 'ai:rt:off' : 'ai:rt:on', $on ? 'danger' : 'success')]];
+        $rows = [[btn($on ? '⛔ خاموش کردن روتر' : '✅ روشن کردن روتر', $on ? 'ai:rt:off' : 'ai:rt:on', $on ? 'danger' : 'success')]];
         $rows[] = [btn(($set === '' ? '✅ ' : '') . '🔗 هم‌مدلِ چت', 'ai:rset:-:c:0', $set === '' ? 'success' : 'primary')];
         foreach (self::providers() as $id => $name) {
             $is     = $cur === $id;
@@ -165,6 +171,17 @@ final class AiPanel
         $page  = 0;
         $saved = false;
 
+        if ($act === 'web') {
+            $target = $p[2] ?? '';
+            if ($target !== '0' && $target !== '1') {
+                $tg->answer($cq, 'برای تغییر سرچ وب، دکمه‌ی روشن کردن یا خاموش کردن رو بزن.');
+                return;
+            }
+            WebSearch::setEnabled($target === '1');
+            $tg->editMessage($chatId, $msgId, self::text(), self::keyboard());
+            $tg->answer($cq, WebSearch::enabled() ? '✅ سرچ وب روشن شد' : '⛔ سرچ وب خاموش شد');
+            return;
+        }
         if ($act === 'rt') {
             $target = $p[2] ?? '';
             if ($target === 'on') {
@@ -172,7 +189,10 @@ final class AiPanel
             } elseif ($target === 'off') {
                 AI::setRouterOn(false);
             } else {
-                AI::setRouterOn(!AI::routerOn());
+                // Legacy or malformed callbacks must never invert a saved state.
+                $tg->editMessage($chatId, $msgId, self::routerText(), self::routerKeyboard());
+                $tg->answer($cq, 'برای تغییر وضعیت، دکمه‌ی روشن کردن یا خاموش کردن روتر رو بزن.');
+                return;
             }
             $tg->editMessage($chatId, $msgId, self::routerText(), self::routerKeyboard());
             $tg->answer($cq, AI::routerOn() ? '✅ روتر روشن شد' : '⛔ روتر خاموش شد');
