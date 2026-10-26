@@ -2,6 +2,8 @@
 
 final class Assistant
 {
+    private static ?array $webSource = null;
+
     private const TAGS = [
         'title'         => 'عنوان',
         'artist'        => 'خواننده',
@@ -61,6 +63,7 @@ final class Assistant
 
     private static function tavilyContext(string $question, array $history = []): ?string
     {
+        self::$webSource = null;
         $key = trim((string) env('TAVILY_API_KEY', ''));
         if ($key === '') {
             return null;
@@ -74,7 +77,7 @@ final class Assistant
             'query' => $query,
             'search_depth' => 'advanced',
             'topic' => 'general',
-            'max_results' => 5,
+            'max_results' => 10,
             'include_answer' => false,
             'include_raw_content' => 'text',
             'include_images' => false,
@@ -88,14 +91,18 @@ final class Assistant
             return null;
         }
         $lines = [];
-        foreach (array_slice($results, 0, 5) as $i => $result) {
+        foreach (array_slice($results, 0, 10) as $i => $result) {
             if (!is_array($result)) {
                 continue;
             }
             $title = trim((string) ($result['title'] ?? ''));
             $content = trim((string) ($result['raw_content'] ?? $result['content'] ?? ''));
+            $url = trim((string) ($result['url'] ?? ''));
             if ($title === '' && $content === '') {
                 continue;
+            }
+            if (self::$webSource === null && $url !== '' && filter_var($url, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+                self::$webSource = ['title' => ($title !== '' ? $title : (string) parse_url($url, PHP_URL_HOST)), 'url' => $url];
             }
             $lines[] = ($i + 1) . '. ' . $title . "\nمحتوا: " . mb_substr($content, 0, 3500);
         }
@@ -562,6 +569,11 @@ final class Assistant
             $answer = preg_replace('~https?://\S+|www\.\S+~iu', '', $answer) ?? $answer;
             $answer = preg_replace('/[ \t]+([,،؛.!؟])/u', '$1', $answer) ?? $answer;
             $answer = trim(preg_replace('/\n{3,}/u', "\n\n", $answer) ?? $answer);
+            if (self::$webSource !== null) {
+                $sourceTitle = h((string) self::$webSource['title']);
+                $sourceUrl = h((string) self::$webSource['url']);
+                $answer .= "\n\n🔎 <b>منبع:</b> <a href=\"{$sourceUrl}\">{$sourceTitle}</a>";
+            }
         }
 
         if (!$live || !$live->finish($answer)) {
