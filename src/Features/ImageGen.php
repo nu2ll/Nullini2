@@ -104,7 +104,7 @@ final class ImageGen
 
     public static function generate(string $prompt, callable $tick): ?string
     {
-        // ترتیب: تاپ‌تولز (فقط وقتی مدل فعال پنل همون باشه) ← کلادفلر Flux
+        
         self::$notice   = null;
         self::$failMsg  = null;
         self::$quotaOut = false;

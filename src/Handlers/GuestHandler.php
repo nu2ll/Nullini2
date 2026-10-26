@@ -117,7 +117,7 @@ final class GuestHandler
         if ($imid === null) {
             return;
         }
-        // عکس موقتاً به چت ذخیره فرستاده و بلافاصله پاک می‌شه؛ فقط file_id می‌مونه
+        
         $media = ImageGen::fileId($bytes);
         if ($media === null) {
             self::edit($imid, $qid, "😕 سرویس ساخت عکس الان جواب نمی‌ده؛\nچند دقیقه دیگه امتحان کن.");

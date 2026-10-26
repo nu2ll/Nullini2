@@ -32,7 +32,7 @@ final class Assistant
     {
         $m = Store::get('ai_memory', self::memKey($chatId, $userId));
         $msgs = is_array($m) && ($m['day'] ?? '') === date('Y-m-d') ? ($m['messages'] ?? []) : [];
-        // قالب قدیمی «[یه عکس براش ساختم: ...]» از حافظه حذف می‌شه
+        
         return array_values(array_filter($msgs, static fn($x) => !preg_match('/یه عکس براش ساختم|\[\[\s*image/u', (string) ($x['content'] ?? ''))));
     }
 
@@ -97,7 +97,7 @@ final class Assistant
         return is_array($t) ? ($t['file_id'] ?? null) : null;
     }
 
-    /** true وقتی فقط یه فریم (تامبنیل) از پیام به هوش مصنوعی می‌رسه: استیکر متحرک/ویدیویی، گیف، ویدیو، ویدیونوت */
+    
     public static function isFrame(array $m): bool
     {
         if (isset($m['photo'])) {
@@ -110,7 +110,7 @@ final class Assistant
         return (isset($m['animation']) || isset($m['video']) || isset($m['video_note'])) && self::frameId($m) !== null;
     }
 
-    /** نوت‌های «[کاربر ...]» که پیام بخشی از یه آلبوم چندتاییه (media_group_id) */
+    
     public static function withAlbum(string $note, array $m): string
     {
         if (empty($m['media_group_id']) || !str_starts_with($note, '[کاربر') || !str_ends_with($note, ']')) {

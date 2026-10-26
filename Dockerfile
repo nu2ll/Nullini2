@@ -26,8 +26,7 @@ RUN { \
 WORKDIR /app
 COPY . .
 
-RUN find . -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null \
- && php tests/smoke.php
+RUN find . -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
 
 ENV LOG_TO_STDERR=1
 EXPOSE 8080

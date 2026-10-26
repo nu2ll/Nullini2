@@ -154,7 +154,7 @@ final class AI
         Store::set('cfg', 'router_on', $on);
     }
 
-    /** مدلِ انتخاب‌شده‌ی مخصوص روتر؛ رشته‌ی خالی = همون مدلِ فعالِ چت */
+    
     public static function routerSetting(): string
     {
         $v = (string) Store::get('cfg', 'router_route', '');
@@ -498,12 +498,12 @@ final class AI
             $closed = (bool) preg_match('/\]\]/u', $im[1]);
             $prompt = preg_replace('/\]\].*$/su', '', $im[1]) ?? $im[1];
             $out['image'] = mb_substr(mbTrim($prompt, " \t\n\"'«»[]"), 0, 700);
-            // استریم وسط تگ قطع شده (مثل «[[image | A hyper-real») → پرامپت ناقصه
+            
             $out['image_partial'] = !$closed && mb_strlen($out['image']) < 40;
             return $out;
         }
         if (preg_match('/^\s*\[\[\s*(image|reaction)\b/iu', $text)) {
-            return $out; // تگ خام هیچ‌وقت به‌عنوان جواب نمایش داده نشه
+            return $out; 
         }
 
         $text          = self::clean($text, $opt['max_len'] ?? 4096);
@@ -545,7 +545,7 @@ final class AI
         return null;
     }
 
-    /** خط فقط ایموجی (مثل «😘») بدون هیچ حرف و عددی؟ */
+    
     public static function isEmojiLine(string $line): bool
     {
         $line = trim($line);
@@ -554,10 +554,10 @@ final class AI
             && preg_match('/[\p{So}]/u', $line) === 1;
     }
 
-    /**
-     * $bare = true: بعضی مدل‌ها به‌جای «[[reaction | 😘]]» فقط یه ایموجی تو خط اول می‌نویسن
-     * و بعدش جواب رو؛ اون ایموجی هم به‌عنوان ری‌اکشن حساب می‌شه (فقط وقتی بعدش متنی باشه).
-     */
+    
+
+
+
     public static function splitReaction(string $text, bool $bare = false): array
     {
         $text  = ltrim($text);

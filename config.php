@@ -41,7 +41,7 @@ return [
             ]),
         ],
         'free_only'   => [
-            'apinex' => true, // فقط مدل‌های لیست free_order (رایگان‌ها)؛ مدل‌های پولی استفاده نشن
+            'apinex' => true, 
         ],
         'free_skip'   => [
             'toptools' => envList('TOPTOOLS_SKIP', ['claude-opus-5', 'gpt-5.6-sol', 'DeepSeek-V4-Flash-Vision-Exp']),

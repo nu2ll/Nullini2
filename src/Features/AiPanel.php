@@ -61,13 +61,9 @@ final class AiPanel
     public static function routerText(): string
     {
         $set = AI::routerSetting();
-        return "<b>🧭 روتر</b>\n\n"
-            . "روتر تشخیص می‌ده پیام کاربر یه دستور برای یکی از ابزارهاست (ترجمه، هوا، دانلود، ...) یا فقط گپه.\n"
-            . "با خاموش کردنش همه‌ی پیام‌ها مستقیم می‌رن سراغ مدل چت.\n\n"
-            . "وضعیت: <b>" . (AI::routerOn() ? 'روشن ✅' : 'خاموش ⛔') . "</b>\n"
-            . "مدل روتر: <b>" . ($set === '' ? 'هم‌مدلِ چت' : bidi(h(self::label($set)))) . "</b>"
-            . ($set === '' ? "\n<i>(الان: " . bidi(h(self::label(AI::route()))) . ')</i>' : '')
-            . "\n\n💡 روتر برای هر پیام یه تماس اضافه می‌زنه؛ یه مدل سبک و سریع براش بهتره.";
+        return "وضعیت: " . (AI::routerOn() ? 'روشن ✅' : 'خاموش ❌') . "\n"
+            . "مدل روتر: ⁨<b>" . ($set === '' ? 'هم‌مدلِ چت' : bidi(h(self::label($set)))) . "</b>⁩"
+            . "\n\n💡 روتر برای هر پیام یه تماس اضافه می‌زنه؛\nیه مدل سبک و سریع براش بهتره.";
     }
 
     public static function routerKeyboard(): array
@@ -75,7 +71,7 @@ final class AiPanel
         $on   = AI::routerOn();
         $set  = AI::routerSetting();
         $cur  = $set === '' ? '' : explode(':', $set, 2)[0];
-        $rows = [[btn($on ? '✅ روشنه (برای خاموش کردن بزن)' : '⛔ خاموشه (برای روشن کردن بزن)', 'ai:rt', $on ? 'success' : 'danger')]];
+        $rows = [[btn($on ? 'خاموش' : 'روشن', 'ai:rt', $on ? 'danger' : 'success')]];
         $rows[] = [btn(($set === '' ? '✅ ' : '') . '🔗 هم‌مدلِ چت', 'ai:rset:-:c:0', $set === '' ? 'success' : 'primary')];
         foreach (self::providers() as $id => $name) {
             $is     = $cur === $id;

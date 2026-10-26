@@ -1,8 +1,8 @@
 <?php
-/**
- * BoardImage — کشیدن صفحه‌ی شطرنج به‌صورت عکس (مهره‌های واقعاً سفید و مشکی)
- * با GD و فونت DejaVu که شکل همه‌ی مهره‌ها رو داره.
- */
+
+
+
+
 final class BoardImage
 {
     public const START = 'rnbqkbnrpppppppp' . '................................' . 'PPPPPPPPRNBQKBNR';
@@ -12,7 +12,7 @@ final class BoardImage
         '/usr/share/fonts/dejavu/DejaVuSans.ttf',
     ];
 
-    /** شکل توپر هر مهره؛ رنگش موقع کشیدن تعیین می‌شه */
+    
     private const SOLID   = ['k' => '♚', 'q' => '♛', 'r' => '♜', 'b' => '♝', 'n' => '♞', 'p' => '♟'];
 
     public static function available(): bool
@@ -36,7 +36,7 @@ final class BoardImage
         return imagecolorallocatealpha($im, hexdec(substr($hex, 0, 2)), hexdec(substr($hex, 2, 2)), hexdec(substr($hex, 4, 2)), $alpha);
     }
 
-    /** یه کاراکتر رو دقیقاً وسط یه خونه می‌کشه */
+    
     private static function glyph($im, string $font, float $size, string $ch, int $cx, int $cy, $color): void
     {
         $box = imagettfbbox($size, 0, $font, $ch);
@@ -45,10 +45,10 @@ final class BoardImage
         imagettftext($im, $size, 0, (int) ($cx - $w / 2 - $box[0]), (int) ($cy + $h / 2 - $box[1]), $color, $font, $ch);
     }
 
-    /**
-     * $board: ۶۴ کاراکتر (از a8 تا h1)، '.' یعنی خالی
-     * $last: [از، به] حرکت آخر · $check: خونه‌ی شاهِ کیش‌شده یا -1
-     */
+    
+
+
+
     public static function render(string $board, array $last = [], int $check = -1, int $px = 720): ?string
     {
         $font = self::font();
@@ -93,7 +93,7 @@ final class BoardImage
                 $cy = $y + intdiv($sq, 2) + (int) ($sq * 0.02);
                 self::glyph($im, $font, $size, self::SOLID[$k], $cx + 2, $cy + 3, $shadow);
                 $white_ = ctype_upper($p);
-                // دورگیری: همون شکل چند بار با کمی جابه‌جایی (سفیدها دور مشکی، مشکی‌ها دور روشن)
+                
                 $rad = $white_ ? 2.0 : 1.2;
                 for ($a = 0; $a < 12; $a++) {
                     $ox = (int) round($rad * cos($a * M_PI / 6));
@@ -104,10 +104,10 @@ final class BoardImage
             }
         }
 
-        // مختصات کنار صفحه (a تا h و ۱ تا ۸)
+        
         $cs = max(7, $sq * 0.14);
         for ($c = 0; $c < 8; $c++) {
-            $col = $c % 2 === 0 ? $light : $dark; // رنگ مخالف خونه‌ی ردیف آخر
+            $col = $c % 2 === 0 ? $light : $dark; 
             imagettftext($im, $cs, 0, $c * $sq + $sq - (int) ($cs * 1.1), $px - (int) ($cs * 0.45), $col, $font, chr(97 + $c));
         }
         for ($r = 0; $r < 8; $r++) {
