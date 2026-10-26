@@ -291,7 +291,11 @@ final class FreeAI
             'temperature' => $opt['temperature'] ?? 0.7,
         ];
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
-        $cap      = $prov === 'groq' ? 10 : (int) ($opt['per_try'] ?? 45);
+        $search   = $prov === 'groq' && !empty($opt['search']) && preg_match('/gpt-oss/i', $model) === 1;
+        if ($search) {
+            $payload['tools'] = [['type' => 'browser_search']];
+        }
+        $cap      = $prov === 'groq' ? ($search || str_contains($model, 'compound') ? 30 : 10) : (int) ($opt['per_try'] ?? 45);
         $url      = self::PROVIDERS[$prov]['url'] . '/chat/completions';
         $n        = count($keys);
         $start    = random_int(0, $n - 1);
@@ -319,6 +323,12 @@ final class FreeAI
             }
 
             logWarn('ai', "{$route} key{$idx} HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $r['raw']), 0, 160));
+            if ($search && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser/i', (string) $r['raw']) === 1) {
+                unset($payload['tools']);
+                $search = false;
+                $i--;
+                continue;
+            }
             if ($r['code'] === 400 && !$merged && preg_match('/instruction|system/i', (string) $r['raw'])) {
                 $payload['messages'] = self::mergeSystem($payload['messages']);
                 $merged              = true;

@@ -200,7 +200,8 @@ final class AI
 
         $chain = $only !== null ? [$only] : self::models($opt['tier'] ?? 'smart');
         foreach ($chain as $model) {
-            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : 'low';
+            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : 'minimal';
+            $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma');
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];
                 if (self::isCooling($key, $model)) {
@@ -220,6 +221,9 @@ final class AI
                 if ($thinking && !$gemma) {
                     $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking];
                 }
+                if ($tools) {
+                    $payload['tools'] = [['google_search' => new stdClass()], ['url_context' => new stdClass()]];
+                }
                 $r = is_callable($opt['stream'] ?? null)
                     ? self::geminiStream($model, $payload, $key, (int) max(5, min($left, 55)), $opt['stream'])
                     : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, 10)));
@@ -238,6 +242,10 @@ final class AI
                 logWarn('ai', "{$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $raw), 0, 160));
 
                 switch (true) {
+                    case $tools && ($r['code'] === 429 || ($r['code'] === 400 && preg_match('/tool|search|ground|url_context/i', $raw) === 1)):
+                        $tools = false;
+                        $i--;
+                        break;
                     case $r['code'] === 429:
                         if (preg_match('/per ?day|PerDay|daily/i', $raw)) {
                             self::cool($key, $model, self::quotaResetAt(), 'سهمیه‌ی روزانه تموم شد');
@@ -457,12 +465,13 @@ final class AI
             'tier'        => $opt['tier'] ?? 'smart',
             'temperature' => 0.7,
             'deadline'    => $deadline,
+            'search'      => true,
             'section'     => 'chat',
             'stream'      => $opt['on_text'] ?? null,
         ]);
         if ($text === null && ($opt['tier'] ?? 'smart') === 'smart' && self::hasTiers() && $deadline - microtime(true) > 5) {
             logWarn('ai', 'smart chain failed, retrying on lite');
-            $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'deadline' => $deadline, 'thinking' => null, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
+            $text = self::chat($messages, ['tier' => 'lite', 'temperature' => 0.7, 'deadline' => $deadline, 'thinking' => null, 'search' => true, 'section' => 'chat', 'stream' => $opt['on_text'] ?? null]);
         }
 
         $out = ['answer' => null, 'reaction' => null, 'image' => null, 'action' => null];
