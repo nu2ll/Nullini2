@@ -276,16 +276,12 @@ check('dl clock', Downloader::clock(3725), '1:02:05');
 check('dl explain bot', str_contains(Downloader::explain("ERROR: Sign in to confirm you're not a bot"), 'ربات'), true);
 check('dl explain size', str_contains(Downloader::explain('File is larger than max-filesize'), Downloader::limitText()), true);
 
-$pinHtml = '<html><script id="__PWS_DATA__" type="application/json">' . json_encode(['x' => [
-    ['id' => '999', 'carousel_data' => ['carousel_slots' => [['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/z.jpg', 'width' => 236]]]]]],
-    ['id' => '123', 'carousel_data' => ['carousel_slots' => [
-        ['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/a.jpg', 'width' => 236], 'originals' => ['url' => 'https://i.pinimg.com/originals/a.jpg', 'width' => 1200]]],
-        ['images' => ['736x' => ['url' => 'https://i.pinimg.com/736x/b.jpg', 'width' => 736]]],
-    ]]],
-]]) . '</script></html>';
-check('pin carousel count', count(Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123/')), 2);
-check('pin carousel original first', Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123/')[0][0], 'https://i.pinimg.com/originals/a.jpg');
-check('pin carousel none', Photos::pinImages('<html></html>', ''), []);
+$relay = '<script data-relay-response="true" type="application/json">' . json_encode(['requestParameters' => ['name' => 'CloseupDetailQuery'], 'response' => ['data' => ['v3GetPinQuery' => ['data' => ['carouselData' => ['carouselSlots' => [
+    ['imageSpec_orig' => ['url' => 'https://i.pinimg.com/originals/aa/bb/1.jpg'], 'imageSpec_236x' => ['url' => 'https://i.pinimg.com/236x/aa/bb/1.jpg']],
+    ['imageSpec_orig' => ['url' => 'https://i.pinimg.com/originals/aa/bb/2.jpg']],
+]]]]]]]) . '</script>';
+check('pin relay carousel', count(Photos::pinRelaySets(Photos::pinRelay($relay) ?? [])), 2);
+check('pin relay first original', Photos::pinRelaySets(Photos::pinRelay($relay) ?? [])[0][0], 'https://i.pinimg.com/originals/aa/bb/1.jpg');
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');
 check('entry kind formats', Downloader::entryKind(['formats' => [['vcodec' => 'h264']]]), 'v');

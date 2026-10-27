@@ -152,97 +152,83 @@ final class Photos
         if (preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pu)) {
             $url = 'https://www.pinterest.com/pin/' . $pu[1] . '/';
         }
-        $r    = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
-        $html = (string) ($r['body'] ?? '');
-        $car  = self::pinImages($html, $url);
-        if (count($car) > 1) {
-            return $car;
-        }
-        $id = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1]
-            : (preg_match('#(?:rel="canonical"[^>]*href|og:url"[^>]*content)="[^"]*?/pin/(?:[\w-]*?--)?(\d+)#', $html, $pm) ? $pm[1] : '');
-        logInfo('photo', "pin {$id}: html=" . strlen($html) . ' http=' . $r['code'] . ' pws=' . (str_contains($html, '__PWS_') ? '1' : '0'));
-        if ($id !== '') {
-            $car = self::pinApi($id);
-            logInfo('photo', "pin {$id}: api slots=" . count($car));
-            if (count($car) > 1) {
-                return $car;
-            }
-        }
-        $og   = self::og($html);
-        if (preg_match('#s\.pinimg\.com/(?:images|webapp)/#', $og)) {
-            $og = '';
-        }
-        if ($og === '' && preg_match('#https://i\.pinimg\.com/originals/[\w/]+\.(?:jpe?g|png|gif|webp)#i', $html, $m)) {
-            $og = $m[0];
-        }
-        if ($og === '') {
-            return [];
-        }
-        $orig = preg_replace('#i\.pinimg\.com/\d+x(?:\d+)?/#', 'i.pinimg.com/originals/', $og) ?? $og;
-        return [self::unique([$orig, $og])];
+        $r = Http::request('GET', $url, ['timeout' => 15, 'headers' => [
+            'User-Agent: Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+            'Accept: application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With: XMLHttpRequest',
+        ]]);
+        $pin  = self::pinRelay((string) ($r['body'] ?? ''));
+        $sets = $pin !== null ? self::pinRelaySets($pin) : [];
+        logInfo('photo', 'pin relay: ' . ($pin !== null ? 'yes' : 'no') . ' http=' . $r['code'] . ' sets=' . count($sets));
+        return $sets;
     }
 
-    public static function pinImages(string $html, string $url = ''): array
+    public static function pinRelay(string $html): ?array
     {
-        if (!preg_match('#<script[^>]+id="__PWS_(?:INITIAL_PROPS|DATA)__"[^>]*>(.*?)</script>#s', $html, $m)) {
-            return [];
+        if (!preg_match_all('#<script[^>]*data-relay-response="true"[^>]*>(.*?)</script>#s', $html, $m)) {
+            return null;
         }
-        $j = json_decode($m[1], true);
-        if (!is_array($j)) {
-            return [];
+        foreach ($m[1] as $raw) {
+            $j   = json_decode(trim($raw), true);
+            $pin = is_array($j) && ($j['requestParameters']['name'] ?? '') === 'CloseupDetailQuery'
+                ? ($j['response']['data']['v3GetPinQuery']['data'] ?? null) : null;
+            if (is_array($pin)) {
+                return $pin;
+            }
         }
-        $pinId = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1] : '';
-        $found = null;
-        $walk  = static function ($node) use (&$walk, &$found, $pinId): void {
-            if ($found !== null || !is_array($node)) {
-                return;
-            }
-            if (isset($node['carousel_data']['carousel_slots']) && is_array($node['carousel_data']['carousel_slots'])
-                && ($pinId === '' || (string) ($node['id'] ?? '') === $pinId)) {
-                $found = $node['carousel_data']['carousel_slots'];
-                return;
-            }
-            foreach ($node as $v) {
-                $walk($v);
+        return null;
+    }
+
+    private static function pinUrls(mixed $node): array
+    {
+        $found = [];
+        $walk  = static function ($n) use (&$walk, &$found): void {
+            if (is_array($n)) {
+                foreach ($n as $v) {
+                    $walk($v);
+                }
+            } elseif (is_string($n) && preg_match('#^https://i\.pinimg\.com/\S+\.(?:jpe?g|png|webp|gif)(?:\?\S*)?$#i', $n)) {
+                $found[] = $n;
             }
         };
-        $walk($j);
-        return self::slotUrls((array) $found);
+        $walk($node);
+        $rank = static function (string $u): int {
+            if (str_contains($u, '/originals/')) {
+                return 100000;
+            }
+            return preg_match('#i\.pinimg\.com/(\d+)x#', $u, $mm) ? (int) $mm[1] : 0;
+        };
+        usort($found, static fn($a, $b): int => $rank($b) <=> $rank($a));
+        return self::unique($found);
     }
 
-    private static function slotUrls(array $slots): array
+    public static function pinRelaySets(array $pin): array
     {
-        $out = [];
-        foreach ($slots as $slot) {
-            $imgs = (array) ($slot['images'] ?? []);
-            $c    = [];
-            foreach (['originals', 'orig'] as $k) {
-                if (!empty($imgs[$k]['url'])) {
-                    $c[] = (string) $imgs[$k]['url'];
-                }
-            }
-            uasort($imgs, static fn($a, $b) => (int) ($b['width'] ?? 0) <=> (int) ($a['width'] ?? 0));
-            foreach ($imgs as $img) {
-                if (!empty($img['url'])) {
-                    $c[] = (string) $img['url'];
-                }
-            }
-            $c = self::unique($c);
-            if ($c) {
+        if (str_contains((string) json_encode($pin), 'videoDataV2')) {
+            return [];
+        }
+        $out   = [];
+        $slots = $pin['carouselData']['carouselSlots'] ?? $pin['carousel_data']['carousel_slots'] ?? null;
+        foreach (is_array($slots) ? $slots : [] as $slot) {
+            if (($c = self::pinUrls($slot)) !== []) {
                 $out[] = $c;
             }
         }
-        return array_slice($out, 0, self::MAX);
-    }
-
-    private static function pinApi(string $id): array
-    {
-        $data = json_encode(['options' => ['id' => $id, 'field_set_key' => 'detailed'], 'context' => new \stdClass()]);
-        $j    = Http::getJson('https://www.pinterest.com/resource/PinResource/get/?source_url=' . rawurlencode("/pin/{$id}/") . '&data=' . rawurlencode((string) $data), [
-            'User-Agent: ' . self::UA, 'X-Requested-With: XMLHttpRequest', 'X-Pinterest-AppState: active', 'Accept-Language: en-US,en;q=0.9',
-        ], 15);
-        $slots = $j['resource_response']['data']['carousel_data']['carousel_slots'] ?? null;
-        return is_array($slots) ? self::slotUrls($slots) : [];
+        if (count($out) > 1) {
+            return array_slice($out, 0, self::MAX);
+        }
+        $out   = [];
+        $pages = $pin['storyPinData']['pages'] ?? null;
+        foreach (is_array($pages) ? $pages : [] as $page) {
+            if (($c = self::pinUrls($page['blocks'][0] ?? $page)) !== []) {
+                $out[] = $c;
+            }
+        }
+        if (count($out) > 1) {
+            return array_slice($out, 0, self::MAX);
+        }
+        $one = self::pinUrls([$pin['imageSpec_orig'] ?? null, $pin['images'] ?? null, $pin['imageLargeUrl'] ?? null]);
+        return $one !== [] ? [$one] : [];
     }
 
     private static function twitter(string $url): array
