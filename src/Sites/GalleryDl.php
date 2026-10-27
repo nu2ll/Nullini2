@@ -40,7 +40,7 @@ final class GalleryDl
             return [];
         }
         $url  = self::resolve($url);
-        $args = [$bin, '--config-ignore', '-q', '-j', '-o', 'timeout=15'];
+        $args = [$bin, '--config-ignore', '-j', '-o', 'timeout=15'];
         if (($jar = Downloader::cookiesFile()) !== null) {
             $args[] = '--cookies';
             $args[] = $jar;
@@ -57,6 +57,9 @@ final class GalleryDl
         if ($sets === [] && $depth < 2 && ($next = self::queued($res['out'])) !== null && $next !== $url) {
             logInfo('photo', 'gallery-dl queued -> ' . (string) parse_url($next, PHP_URL_HOST));
             return self::images($next, $depth + 1);
+        }
+        if ($sets === []) {
+            logWarn('photo', 'gallery-dl empty: out=' . substr((string) preg_replace('/\\s+/', ' ', $res['out']), 0, 300) . ' err=' . substr(trim($res['err']), -300));
         }
         return $sets;
     }

@@ -32,6 +32,7 @@ final class Photos
             logInfo('photo', $link['site'] . ': found ' . count($sets) . ' of ' . $expect . ', falling back to yt-dlp');
             return false;
         }
+        logInfo('photo', $link['site'] . ': first=' . substr((string) ($sets[0][0] ?? ''), 0, 160));
         $tg->action($chat, 'upload_photo');
         $cap  = '🖼 از ' . $link['name'];
         $sent = count($sets) === 1 ? self::single($chat, $sets[0], $cap, (int) $msg['message_id']) : self::album($chat, $sets, $cap, (int) $msg['message_id']);
@@ -192,6 +193,7 @@ final class Photos
             if ($b === null) {
                 continue;
             }
+            logInfo('photo', 'single bytes=' . strlen($b) . ' head=' . bin2hex(substr($b, 0, 4)) . ' gif=' . (str_starts_with($b, 'GIF') ? '1' : '0'));
             $sent = str_starts_with($b, 'GIF')
                 ? App::tg()->sendAnimationBytes($chat, $b, $cap, $replyTo)
                 : App::tg()->sendPhotoBytes($chat, $b, $cap, $replyTo);
