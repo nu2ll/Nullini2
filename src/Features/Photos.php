@@ -189,7 +189,13 @@ final class Photos
     {
         foreach ($cands as $u) {
             $b = self::fetch($u);
-            if ($b !== null && App::tg()->sendPhotoBytes($chat, $b, $cap, $replyTo)) {
+            if ($b === null) {
+                continue;
+            }
+            $sent = str_starts_with($b, 'GIF')
+                ? App::tg()->sendAnimationBytes($chat, $b, $cap, $replyTo)
+                : App::tg()->sendPhotoBytes($chat, $b, $cap, $replyTo);
+            if ($sent) {
                 return true;
             }
         }
@@ -199,25 +205,36 @@ final class Photos
     private static function album(int|string $chat, array $sets, string $cap, int $replyTo): bool
     {
         $files = [];
+        $gifs  = [];
         try {
             foreach ($sets as $cands) {
                 foreach ($cands as $u) {
                     if (($b = self::fetch($u)) !== null) {
                         $tmp = tempnam(sys_get_temp_dir(), 'nl_ph_');
                         if ($tmp !== false && file_put_contents($tmp, $b) !== false) {
-                            $files[] = $tmp;
+                            if (str_starts_with($b, 'GIF')) {
+                                $gifs[] = $tmp;
+                            } else {
+                                $files[] = $tmp;
+                            }
                         }
                         break;
                     }
                 }
             }
-            if (!$files) {
+            if (!$files && !$gifs) {
                 return false;
             }
-            if (count($files) === 1) {
-                return App::tg()->sendPhotoBytes($chat, (string) file_get_contents($files[0]), $cap, $replyTo);
-            }
             $ok = false;
+            foreach ($gifs as $g => $f) {
+                $ok = App::tg()->sendAnimationBytes($chat, (string) file_get_contents($f), $g === 0 && !$files ? $cap : '', $replyTo) || $ok;
+            }
+            if (!$files) {
+                return $ok;
+            }
+            if (count($files) === 1) {
+                return App::tg()->sendPhotoBytes($chat, (string) file_get_contents($files[0]), $cap, $replyTo) || $ok;
+            }
             foreach (array_chunk($files, self::GROUP) as $g => $chunk) {
                 $capG = $g === 0 ? $cap : '';
                 if (count($chunk) === 1) {
@@ -242,7 +259,7 @@ final class Photos
             }
             return $ok;
         } finally {
-            foreach ($files as $f) {
+            foreach (array_merge($files, $gifs) as $f) {
                 @unlink($f);
             }
         }

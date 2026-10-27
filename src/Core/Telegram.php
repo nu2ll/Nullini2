@@ -282,4 +282,24 @@ final class Telegram
         }
         return !empty($r['ok']);
     }
+
+    public function sendAnimationBytes(int|string $chatId, string $bytes, string $caption = '', ?int $replyTo = null): bool
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'nl_gif_');
+        if ($tmp === false || file_put_contents($tmp, $bytes) === false) {
+            return false;
+        }
+        try {
+            $r = $this->call('sendAnimation', [
+                'chat_id'          => $chatId,
+                'animation'        => new CURLFile($tmp, 'image/gif', 'nullini.gif'),
+                'caption'          => $caption !== '' ? $caption : null,
+                'parse_mode'       => 'HTML',
+                'reply_parameters' => $replyTo ? ['message_id' => $replyTo, 'allow_sending_without_reply' => true] : null,
+            ], 90);
+        } finally {
+            @unlink($tmp);
+        }
+        return !empty($r['ok']);
+    }
 }
