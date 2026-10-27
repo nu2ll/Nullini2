@@ -283,6 +283,17 @@ check('gdl ext from url', GalleryDl::parse((string) json_encode([[3, 'https://i.
 check('gdl garbage', GalleryDl::parse('not json'), []);
 check('gdl queued', GalleryDl::queued((string) json_encode([[6, 'https://www.pinterest.com/pin/123/', []]])), 'https://www.pinterest.com/pin/123/');
 check('gdl no queue', GalleryDl::queued('[]'), null);
+$pv = (string) json_encode([[2, ['videos' => ['video_list' => ['V_HLSV4' => ['url' => 'https://v1.pinimg.com/a.m3u8'], 'V_480P' => ['url' => 'https://v1.pinimg.com/a_480w.mp4', 'width' => 640, 'height' => 480, 'duration' => 5000], 'V_720P' => ['url' => 'https://v1.pinimg.com/a_720w.mp4', 'width' => 1080, 'height' => 720, 'duration' => 5042]]]]]]);
+check('pin video largest mp4', GalleryDl::pinVideo($pv), ['url' => 'https://v1.pinimg.com/a_720w.mp4', 'ms' => 5042]);
+check('pin video hls only', GalleryDl::pinVideo((string) json_encode([[2, ['videos' => ['video_list' => ['V_HLSV4' => ['url' => 'https://v1.pinimg.com/a.m3u8']]]]]])), null);
+check('pin video none', GalleryDl::pinVideo((string) json_encode([[2, ['videos' => null]]])), null);
+$ps = (string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [
+    ['url' => 'https://i.pinimg.com/originals/a/1.jpg', 'videos' => ['video_list' => ['V_720P' => ['url' => 'https://v1.pinimg.com/1.mp4']]]],
+    ['url' => 'https://i.pinimg.com/originals/b/2.jpg', 'videos' => null],
+]]]]]);
+check('pin slots', GalleryDl::pinSlots($ps), [['https://v1.pinimg.com/1.mp4', 'https://i.pinimg.com/originals/a/1.jpg'], ['https://i.pinimg.com/originals/b/2.jpg']]);
+check('pin slots long video', GalleryDl::pinSlots((string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg', 'videos' => ['video_list' => ['V_720P' => ['url' => 'https://v1.pinimg.com/1.mp4', 'duration' => 120000]]]]]]]]])), []);
+check('pin slots images only', GalleryDl::pinSlots((string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg']]]]]])), []);
 check('gdl supports', [GalleryDl::supports('instagram'), GalleryDl::supports('pinterest'), GalleryDl::supports('reddit')], [true, true, false]);
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');

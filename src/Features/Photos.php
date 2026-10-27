@@ -63,20 +63,24 @@ final class Photos
                 if ($tmp === false || file_put_contents($tmp, $b) === false) {
                     return false;
                 }
+                $anim = self::isAnim($b);
+                $mp4  = self::isMp4($b);
                 try {
-                    $r = $tg->call('sendPhoto', ['chat_id' => $store, 'photo' => new CURLFile($tmp, 'image/jpeg', 'photo.jpg'), 'disable_notification' => true], 90);
+                    $r = $anim
+                        ? $tg->call('sendAnimation', ['chat_id' => $store, 'animation' => $mp4 ? new CURLFile($tmp, 'video/mp4', 'nullini.mp4') : new CURLFile($tmp, 'image/gif', 'nullini.gif'), 'disable_notification' => true], 90)
+                        : $tg->call('sendPhoto', ['chat_id' => $store, 'photo' => new CURLFile($tmp, 'image/jpeg', 'photo.jpg'), 'disable_notification' => true], 90);
                 } finally {
                     @unlink($tmp);
                 }
                 $sizes = (array) ($r['result']['photo'] ?? []);
-                $fid   = (string) (end($sizes)['file_id'] ?? '');
+                $fid   = $anim ? (string) ($r['result']['animation']['file_id'] ?? $r['result']['document']['file_id'] ?? '') : (string) (end($sizes)['file_id'] ?? '');
                 if ($fid === '') {
                     continue;
                 }
                 $more = count($sets) > 1 ? "\n📚 " . fa((string) count($sets)) . ' تا عکس داره؛ بقیه رو تو پیوی بگیر.' : '';
                 $e    = $tg->call('editMessageMedia', [
                     'inline_message_id' => $imid,
-                    'media'             => ['type' => 'photo', 'media' => $fid, 'caption' => '🖼 از ' . $link['name'] . $more, 'parse_mode' => 'HTML'],
+                    'media'             => ['type' => $anim ? 'animation' : 'photo', 'media' => $fid, 'caption' => '🖼 از ' . $link['name'] . $more, 'parse_mode' => 'HTML'],
                 ], 30);
                 if (env('DL_STORE_CHAT', '') === '' && !empty($r['result']['message_id'])) {
                     $tg->call('deleteMessage', ['chat_id' => $store, 'message_id' => (int) $r['result']['message_id']], 8);
@@ -96,11 +100,31 @@ final class Photos
     {
         return match ($site) {
             'instagram' => GalleryDl::images($url),
-            'pinterest' => GalleryDl::images($url),
+            'pinterest' => self::pinterest($url),
             'twitter'   => self::twitter($url),
             'reddit'    => self::reddit($url),
             default     => [],
         };
+    }
+
+    private static function pinterest(string $url): array
+    {
+        $raw  = '';
+        $sets = GalleryDl::images($url, 0, $raw);
+        $slots = GalleryDl::pinSlots($raw);
+        if (count($slots) > 1) {
+            logInfo('dl', 'pinterest: carousel with video, slots=' . count($slots));
+            return $slots;
+        }
+        if (($v = GalleryDl::pinVideo($raw)) !== null) {
+            if ($v['ms'] > GalleryDl::GIF_MAX_MS) {
+                logInfo('dl', 'pinterest: real video (' . intdiv($v['ms'], 1000) . 's), left to yt-dlp');
+                return [];
+            }
+            logInfo('dl', 'pinterest: animated pin, using mp4');
+            return [[$v['url']]];
+        }
+        return $sets;
     }
 
     private static function twitter(string $url): array
@@ -178,14 +202,27 @@ final class Photos
     {
         $r   = Http::request('GET', $url, ['timeout' => 40, 'headers' => ['User-Agent: ' . self::UA, 'Accept: image/avif,image/webp,image/*,*/*']]);
         $b   = $r['body'];
-        $gif = $b !== null && str_starts_with($b, 'GIF');
+        $gif = $b !== null && (str_starts_with($b, 'GIF') || self::isMp4($b));
         if ($b === null || $r['code'] >= 400 || strlen($b) < 800 || strlen($b) > ($gif ? 30 : 10) * 1048576) {
             return null;
         }
         if (self::isHeic($b)) {
             return self::heicToJpeg($b);
         }
+        if (self::isMp4($b)) {
+            return $b;
+        }
         return @getimagesizefromstring($b) === false ? null : $b;
+    }
+
+    private static function isMp4(string $b): bool
+    {
+        return substr($b, 4, 4) === 'ftyp' && !self::isHeic($b);
+    }
+
+    private static function isAnim(string $b): bool
+    {
+        return str_starts_with($b, 'GIF') || self::isMp4($b);
     }
 
     private static function isHeic(string $b): bool
@@ -226,7 +263,7 @@ final class Photos
             if ($b === null) {
                 continue;
             }
-            $sent = str_starts_with($b, 'GIF')
+            $sent = self::isAnim($b)
                 ? App::tg()->sendAnimationBytes($chat, $b, $cap, $replyTo)
                 : App::tg()->sendPhotoBytes($chat, $b, $cap, $replyTo);
             if ($sent) {
@@ -246,7 +283,7 @@ final class Photos
                     if (($b = self::fetch($u)) !== null) {
                         $tmp = tempnam(sys_get_temp_dir(), 'nl_ph_');
                         if ($tmp !== false && file_put_contents($tmp, $b) !== false) {
-                            if (str_starts_with($b, 'GIF')) {
+                            if (self::isAnim($b)) {
                                 $gifs[] = $tmp;
                             } else {
                                 $files[] = $tmp;

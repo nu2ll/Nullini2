@@ -289,10 +289,11 @@ final class Telegram
         if ($tmp === false || file_put_contents($tmp, $bytes) === false) {
             return false;
         }
+        $mp4 = substr($bytes, 4, 4) === 'ftyp';
         try {
             $r = $this->call('sendAnimation', [
                 'chat_id'          => $chatId,
-                'animation'        => new CURLFile($tmp, 'image/gif', 'nullini.gif'),
+                'animation'        => $mp4 ? new CURLFile($tmp, 'video/mp4', 'nullini.mp4') : new CURLFile($tmp, 'image/gif', 'nullini.gif'),
                 'caption'          => $caption !== '' ? $caption : null,
                 'parse_mode'       => 'HTML',
                 'reply_parameters' => $replyTo ? ['message_id' => $replyTo, 'allow_sending_without_reply' => true] : null,

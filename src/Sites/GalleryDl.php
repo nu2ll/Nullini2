@@ -2,7 +2,8 @@
 
 final class GalleryDl
 {
-    public const MAX = 20;
+    public const MAX        = 20;
+    public const GIF_MAX_MS = 60000;
 
     private const SITES = ['instagram', 'pinterest'];
     private const VIDEO = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'm3u8', 'mpd'];
@@ -32,7 +33,7 @@ final class GalleryDl
         return $bin = ($found !== '' ? $found : null);
     }
 
-    public static function images(string $url, int $depth = 0): array
+    public static function images(string $url, int $depth = 0, ?string &$raw = null): array
     {
         $bin = self::bin();
         if ($bin === null) {
@@ -52,12 +53,13 @@ final class GalleryDl
         }
         $args[] = $url;
         $res  = Downloader::exec($args, 45);
+        $raw  = $res['out'];
         $sets = self::parse($res['out']);
         $host = (string) parse_url($url, PHP_URL_HOST);
         logInfo('dl', "gallery-dl {$host}: count=" . count($sets));
         if ($sets === [] && $depth < 2 && ($next = self::queued($res['out'])) !== null && $next !== $url) {
             logInfo('dl', "gallery-dl {$host}: queued -> " . (string) parse_url($next, PHP_URL_HOST));
-            return self::images($next, $depth + 1);
+            return self::images($next, $depth + 1, $raw);
         }
         if ($sets === []) {
             logWarn('dl', "gallery-dl {$host} failed (exit {$res['code']}): " . self::lastLine($res['err']));
@@ -82,6 +84,107 @@ final class GalleryDl
     {
         $lines = array_values(array_filter(array_map('trim', explode("\n", $err)), static fn($l) => $l !== ''));
         return mb_substr((string) end($lines), 0, 300);
+    }
+
+    private static function pinMeta(array $row): ?array
+    {
+        $meta = ($row[0] ?? null) === 2 ? ($row[1] ?? null) : (($row[0] ?? null) === 3 ? ($row[2] ?? null) : null);
+        return is_array($meta) ? $meta : null;
+    }
+
+    private static function mp4(mixed $list): ?array
+    {
+        if (!is_array($list)) {
+            return null;
+        }
+        $best = null;
+        $area = -1;
+        foreach ($list as $v) {
+            $u = is_array($v) ? (string) ($v['url'] ?? '') : '';
+            if (!preg_match('#^https?://\S+\.mp4(\?\S*)?$#i', $u)) {
+                continue;
+            }
+            $a = (int) ($v['width'] ?? 0) * (int) ($v['height'] ?? 0);
+            if ($a > $area) {
+                $area = $a;
+                $best = ['url' => $u, 'ms' => (int) ($v['duration'] ?? 0)];
+            }
+        }
+        return $best;
+    }
+
+    public static function pinVideo(string $json): ?array
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            if (is_array($row) && ($meta = self::pinMeta($row)) !== null && ($v = self::mp4($meta['videos']['video_list'] ?? null)) !== null) {
+                return $v;
+            }
+        }
+        return null;
+    }
+
+    public static function pinSlots(string $json): array
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            $slots = is_array($row) && ($meta = self::pinMeta($row)) !== null ? ($meta['carousel_data']['carousel_slots'] ?? null) : null;
+            if (!is_array($slots)) {
+                continue;
+            }
+            $out  = [];
+            $anim = false;
+            foreach ($slots as $slot) {
+                if (!is_array($slot)) {
+                    continue;
+                }
+                $c = [];
+                if (($v = self::mp4($slot['videos']['video_list'] ?? null)) !== null) {
+                    if ($v['ms'] > self::GIF_MAX_MS) {
+                        return [];
+                    }
+                    $c[]  = $v['url'];
+                    $anim = true;
+                }
+                $img = (string) ($slot['url'] ?? $slot['images']['orig']['url'] ?? '');
+                if (preg_match('#^https?://#', $img)) {
+                    $c[] = $img;
+                }
+                if ($c !== []) {
+                    $out[] = $c;
+                }
+            }
+            return $anim ? array_slice($out, 0, self::MAX) : [];
+        }
+        return [];
+    }
+
+    private static function lastLine(string $err): string
+    {
+        $lines = array_values(array_filter(array_map('trim', explode("\n", $err)), static fn($l) => $l !== ''));
+        return mb_substr((string) end($lines), 0, 300);
+    }
+
+    public static function pinVideo(string $json): ?string
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $meta = ($row[0] ?? null) === 2 ? ($row[1] ?? null) : (($row[0] ?? null) === 3 ? ($row[2] ?? null) : null);
+            $list = is_array($meta) ? ($meta['videos']['video_list'] ?? null) : null;
+            if (!is_array($list)) {
+                continue;
+            }
+            foreach (array_merge(['V_720P'], array_keys($list)) as $k) {
+                $u = (string) ($list[$k]['url'] ?? '');
+                if (preg_match('#^https?://\S+\.mp4(\?\S*)?$#i', $u)) {
+                    return $u;
+                }
+            }
+        }
+        return null;
     }
 
     public static function queued(string $json): ?string
