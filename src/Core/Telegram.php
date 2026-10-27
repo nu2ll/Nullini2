@@ -240,17 +240,17 @@ final class Telegram
         return $id;
     }
 
-    public function audioFileId(int|string $chatId, string $file): ?string
+    public function voiceFileId(int|string $chatId, string $file): ?string
     {
-        $r = $this->call('sendAudio', [
+        $r = $this->call('sendVoice', [
             'chat_id'              => $chatId,
-            'audio'                => new CURLFile($file, 'audio/mpeg', 'voice.mp3'),
+            'voice'                => new CURLFile($file, 'audio/ogg', 'voice.ogg'),
             'disable_notification' => true,
         ], 90);
         if (empty($r['ok'])) {
             return null;
         }
-        $id = $r['result']['audio']['file_id'] ?? null;
+        $id = $r['result']['voice']['file_id'] ?? null;
         if (isset($r['result']['message_id'])) {
             $this->call('deleteMessage', ['chat_id' => $chatId, 'message_id' => $r['result']['message_id']]);
         }

@@ -376,7 +376,7 @@ final class AI
                     'contents'         => [['parts' => [['text' => "Read this aloud naturally, in the same language as the text:\n\n" . $text]]]],
                     'generationConfig' => [
                         'responseModalities' => ['AUDIO'],
-                        'speechConfig'       => ['voiceConfig' => ['prebuiltVoiceConfig' => ['voiceName' => 'Puck']]],
+                        'speechConfig'       => ['voiceConfig' => ['prebuiltVoiceConfig' => ['voiceName' => 'Kore']]],
                     ],
                 ], ['x-goog-api-key: ' . $key], (int) max(8, min($left, 40)));
 

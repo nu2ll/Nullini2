@@ -34,7 +34,8 @@ final class GuestHandler
             return;
         }
 
-        $imid = self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
+        $voiceIn = isset($msg['voice']);
+        $imid    = $voiceIn ? null : self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
 
         $parts = [];
         $notes = [];
@@ -99,11 +100,12 @@ final class GuestHandler
         }
 
         if (!empty($res['image'])) {
+            $imid ??= self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
             self::image($imid, $qid, (string) $res['image']);
             return;
         }
 
-        if ($res['answer'] !== null && $imid !== null && isset($msg['voice']) && self::voice($imid, $res['answer'])) {
+        if ($res['answer'] !== null && $voiceIn && self::voice($qid, $res['answer'])) {
             return;
         }
 
@@ -112,7 +114,7 @@ final class GuestHandler
         self::edit($imid, $qid, $html, $answer);
     }
 
-    private static function voice(string $imid, string $answer): bool
+    private static function voice(string $qid, string $answer): bool
     {
         $html = AI::toHtml($answer);
         if (AI::visible($html) > 1024) {
@@ -123,20 +125,24 @@ final class GuestHandler
         if ($chat === '') {
             return false;
         }
-        $file = AI::speak($answer, null, 'mp3');
+        $file = AI::speak($answer);
         if ($file === null) {
             return false;
         }
         $tg = App::tg();
-        $id = $tg->audioFileId($chat, $file);
+        $id = $tg->voiceFileId($chat, $file);
         @unlink($file);
         if ($id === null) {
             return false;
         }
-        $r = $tg->call('editMessageMedia', [
-            'inline_message_id' => $imid,
-            'media'             => ['type' => 'audio', 'media' => $id, 'caption' => $html, 'parse_mode' => 'HTML'],
-        ], 60);
+        $r = $tg->call('answerGuestQuery', ['guest_query_id' => $qid, 'result' => [
+            'type'          => 'voice',
+            'id'            => substr(md5($qid . microtime()), 0, 16),
+            'voice_file_id' => $id,
+            'title'         => 'نالینی',
+            'caption'       => $html,
+            'parse_mode'    => 'HTML',
+        ]], 15);
         return !empty($r['ok']);
     }
 
