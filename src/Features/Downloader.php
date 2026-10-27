@@ -106,6 +106,9 @@ final class Downloader
         $host = preg_replace('/^(www|m|mobile|vm|vt|music)\./', '', $host) ?? $host;
         foreach (self::SITES as $key => [$name, $re]) {
             if (preg_match($re, $host)) {
+                if ($key === 'pinterest' && preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm)) {
+                    $url = 'https://www.pinterest.com/pin/' . $pm[1] . '/';
+                }
                 return ['url' => $url, 'site' => $key, 'name' => $name];
             }
         }
@@ -272,6 +275,7 @@ final class Downloader
         }
         $info  = $p['info'];
         $count = (int) ($info['count'] ?? 1);
+        logInfo('dl', "probe {$link['site']}: count={$count} kinds=" . implode('', (array) ($info['kinds'] ?? [])) . ' video=' . (self::hasVideo($info) ? '1' : '0') . ' multi=' . ($multi ? '1' : '0'));
         if ($multi && $count > 1 && (in_array('v', (array) ($info['kinds'] ?? []), true) || !Photos::supports($link['site']))) {
             $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
             self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));

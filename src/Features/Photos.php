@@ -23,6 +23,7 @@ final class Photos
             logWarn('photo', $link['site'] . ': ' . $e->getMessage());
             return false;
         }
+        logInfo('photo', $link['site'] . ': found ' . count($sets) . ' image(s), expect ' . $expect);
         if (!$sets) {
             logInfo('photo', $link['site'] . ' no images found');
             return false;
@@ -124,6 +125,7 @@ final class Photos
         $r = Http::request('GET', "https://www.instagram.com/p/{$code}/embed/captioned/", ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
         $html = (string) ($r['body'] ?? '');
         $out  = [];
+        logInfo('photo', "ig embed {$code}: http={$r['code']} len=" . strlen($html) . ' display_url=' . substr_count($html, 'display_url') . ' video=' . (preg_match('#is_video|video_url#', $html) ? '1' : '0') . ' sidecar=' . (str_contains($html, 'edge_sidecar_to_children') ? '1' : '0'));
         if (preg_match_all('#display_url[\\\\"\s:]+(https?:(?:[^"\\\\]|\\\\+/|\\\\+u0026)+)#', $html, $m)) {
             foreach ($m[1] as $u) {
                 $out[] = self::unescape($u);
@@ -147,6 +149,9 @@ final class Photos
 
     private static function pinterest(string $url): array
     {
+        if (preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pu)) {
+            $url = 'https://www.pinterest.com/pin/' . $pu[1] . '/';
+        }
         $r    = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
         $html = (string) ($r['body'] ?? '');
         $car  = self::pinImages($html, $url);
@@ -155,13 +160,18 @@ final class Photos
         }
         $id = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1]
             : (preg_match('#(?:rel="canonical"[^>]*href|og:url"[^>]*content)="[^"]*?/pin/(?:[\w-]*?--)?(\d+)#', $html, $pm) ? $pm[1] : '');
+        logInfo('photo', "pin {$id}: html=" . strlen($html) . ' http=' . $r['code'] . ' pws=' . (str_contains($html, '__PWS_') ? '1' : '0'));
         if ($id !== '') {
             $car = self::pinApi($id);
+            logInfo('photo', "pin {$id}: api slots=" . count($car));
             if (count($car) > 1) {
                 return $car;
             }
         }
         $og   = self::og($html);
+        if (preg_match('#s\.pinimg\.com/(?:images|webapp)/#', $og)) {
+            $og = '';
+        }
         if ($og === '' && preg_match('#https://i\.pinimg\.com/originals/[\w/]+\.(?:jpe?g|png|gif|webp)#i', $html, $m)) {
             $og = $m[0];
         }
