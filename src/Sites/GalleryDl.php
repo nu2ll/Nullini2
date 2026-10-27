@@ -159,34 +159,6 @@ final class GalleryDl
         return [];
     }
 
-    private static function lastLine(string $err): string
-    {
-        $lines = array_values(array_filter(array_map('trim', explode("\n", $err)), static fn($l) => $l !== ''));
-        return mb_substr((string) end($lines), 0, 300);
-    }
-
-    public static function pinVideo(string $json): ?string
-    {
-        $data = json_decode(trim($json), true);
-        foreach (is_array($data) ? $data : [] as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $meta = ($row[0] ?? null) === 2 ? ($row[1] ?? null) : (($row[0] ?? null) === 3 ? ($row[2] ?? null) : null);
-            $list = is_array($meta) ? ($meta['videos']['video_list'] ?? null) : null;
-            if (!is_array($list)) {
-                continue;
-            }
-            foreach (array_merge(['V_720P'], array_keys($list)) as $k) {
-                $u = (string) ($list[$k]['url'] ?? '');
-                if (preg_match('#^https?://\S+\.mp4(\?\S*)?$#i', $u)) {
-                    return $u;
-                }
-            }
-        }
-        return null;
-    }
-
     public static function queued(string $json): ?string
     {
         $data = json_decode(trim($json), true);
