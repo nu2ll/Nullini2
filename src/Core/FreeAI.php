@@ -335,7 +335,7 @@ final class FreeAI
 
             logWarn('ai', "{$route} key{$idx} HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $r['raw']), 0, 160));
             if ($search && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
-                unset($payload['tools'], $payload['tool_choice']);
+                unset($payload['tools']);
                 $payload['messages'] = $orig;
                 $search              = false;
                 $i--;
