@@ -323,6 +323,11 @@ switch ($arg) {
         Downloader::work((string) ($argv[2] ?? ''), (string) ($argv[3] ?? 'hd'));
         exit(0);
 
+    case '--autodl':
+        App::useBot((int) ($argv[3] ?? 0));
+        Downloader::auto((string) ($argv[2] ?? ''));
+        exit(0);
+
     case '--warm':
         out('icons cached: ' . Icons::warm(), 'web');
         exit(0);

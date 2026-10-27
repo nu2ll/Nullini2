@@ -276,6 +276,29 @@ check('dl clock', Downloader::clock(3725), '1:02:05');
 check('dl explain bot', str_contains(Downloader::explain("ERROR: Sign in to confirm you're not a bot"), 'ربات'), true);
 check('dl explain size', str_contains(Downloader::explain('File is larger than max-filesize'), Downloader::limitText()), true);
 
+$pinHtml = '<html><script id="__PWS_DATA__" type="application/json">' . json_encode(['x' => [
+    ['id' => '999', 'carousel_data' => ['carousel_slots' => [['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/z.jpg', 'width' => 236]]]]]],
+    ['id' => '123', 'carousel_data' => ['carousel_slots' => [
+        ['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/a.jpg', 'width' => 236], 'originals' => ['url' => 'https://i.pinimg.com/originals/a.jpg', 'width' => 1200]]],
+        ['images' => ['736x' => ['url' => 'https://i.pinimg.com/736x/b.jpg', 'width' => 736]]],
+    ]]],
+]]) . '</script></html>';
+check('pin carousel count', count(Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123/')), 2);
+check('pin carousel original first', Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123/')[0][0], 'https://i.pinimg.com/originals/a.jpg');
+check('pin carousel none', Photos::pinImages('<html></html>', ''), []);
+check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
+check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');
+check('entry kind formats', Downloader::entryKind(['formats' => [['vcodec' => 'h264']]]), 'v');
+$ad = sys_get_temp_dir() . '/nullini_album_' . getmypid();
+@mkdir($ad);
+foreach (['10_c.jpg', '02_b.mp4', '01_a.jpg', '03_x.part', '04_y.txt'] as $f) {
+    file_put_contents("{$ad}/{$f}", 'x');
+}
+check('album files order', array_map(static fn($i) => basename($i[1]), Downloader::albumFiles($ad)), ['01_a.jpg', '02_b.mp4', '10_c.jpg']);
+check('album files kinds', array_column(Downloader::albumFiles($ad), 0), ['photo', 'video', 'photo']);
+array_map('unlink', glob("{$ad}/*"));
+@rmdir($ad);
+
 check('gw guide', str_contains(Ui::guide('giveaway'), 'قرعه‌کشی'), true);
 Db::run('INSERT INTO gw_entries (gid, uid, name, at) VALUES (?, ?, ?, ?) ON CONFLICT (gid, uid) DO NOTHING', ['abc', 1, 'a', time()]);
 $dup = Db::run('INSERT INTO gw_entries (gid, uid, name, at) VALUES (?, ?, ?, ?) ON CONFLICT (gid, uid) DO NOTHING', ['abc', 1, 'a', time()])->rowCount();
@@ -318,13 +341,6 @@ check('slot bars', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '🎰
 check('basketball name', Assistant::dataInfo(['dice' => ['emoji' => '🏀', 'value' => 5]])[0], 'بسکتبال');
 check('football goal rule', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '⚽', 'value' => 3]])[1], 'عدد ۳ و ۴ و ۵ یعنی گل شد'), true);
 
-$resetSwitches = static function (): void {
-    $r = new ReflectionProperty(Switches::class, 'off');
-    if (PHP_VERSION_ID < 80100) {
-        $r->setAccessible(true);
-    }
-    $r->setValue(null, null);
-};
 Switches::setAll(true);
 check('switch all on', array_filter(array_keys(Switches::TOOLS), static fn($k) => !Switches::on($k)), []);
 check('switch tools count', count(Switches::TOOLS), 26);
@@ -341,9 +357,9 @@ check('switch guard off', Switches::guard('ai'), false);
 check('commands all off private', array_column(Ui::commands('private'), 'command'), ['start', 'help']);
 Switches::setAll(true);
 check('switch guard on', Switches::guard('ai'), true);
-check('switch text no off line', str_contains(Switches::text(), '⛔ خاموش:'), false);
+check('switch text no off line', str_contains(Switches::text(), 'خاموش:'), false);
 Switches::toggle('qr');
-check('switch text counts off', str_contains(Switches::text(), '⛔ خاموش: ۱ از ' . fa((string) count(Switches::TOOLS))), true);
+check('switch text counts off', str_contains(Switches::text(), 'خاموش: ۱ از ' . fa((string) count(Switches::TOOLS))), true);
 Switches::toggle('qr');
 $kbButtons = array_merge(...Switches::keyboard()['inline_keyboard']);
 check('switch keyboard buttons', count($kbButtons), count(Switches::TOOLS) + 2);
@@ -352,10 +368,9 @@ check('switch keyboard toggles', count(array_filter($kbButtons, static fn($b) =>
 check('switch keyboard all buttons', array_values(array_map(static fn($b) => $b['callback_data'], array_slice($kbButtons, -2))), ['tl:all:1', 'tl:all:0']);
 Switches::toggle('chess');
 $kbOff = array_values(array_filter(array_merge(...Switches::keyboard()['inline_keyboard']), static fn($b) => $b['callback_data'] === 'tl:t:chess'));
-check('switch keyboard shows off', str_starts_with($kbOff[0]['text'], '⛔'), true);
+check('switch keyboard shows off', $kbOff[0]['style'] ?? null, 'danger');
 Switches::toggle('chess');
 Store::set('cfg', 'tools_off', ['games', 'qr']);
-$resetSwitches();
 check('legacy games chess', Switches::on('chess'), false);
 check('legacy games ttt', Switches::on('ttt'), false);
 check('legacy games c4', Switches::on('c4'), false);
@@ -363,10 +378,8 @@ check('legacy games rps', Switches::on('rps'), false);
 check('legacy games math', Switches::on('math'), false);
 check('legacy keeps others', [Switches::on('qr'), Switches::on('ai')], [false, true]);
 Switches::setAll(true);
-$resetSwitches();
 check('switch persisted on', Switches::on('qr'), true);
 Switches::toggle('qr');
-$resetSwitches();
 check('switch persists across reload', Switches::on('qr'), false);
 Switches::setAll(true);
 foreach (Switches::COMMAND_SWITCH as $cmd => $sw) {

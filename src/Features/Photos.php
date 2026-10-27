@@ -144,6 +144,10 @@ final class Photos
     {
         $r    = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
         $html = (string) ($r['body'] ?? '');
+        $car  = self::pinImages($html, $url);
+        if (count($car) > 1) {
+            return $car;
+        }
         $og   = self::og($html);
         if ($og === '' && preg_match('#https://i\.pinimg\.com/originals/[\w/]+\.(?:jpe?g|png|gif|webp)#i', $html, $m)) {
             $og = $m[0];
@@ -153,6 +157,54 @@ final class Photos
         }
         $orig = preg_replace('#i\.pinimg\.com/\d+x(?:\d+)?/#', 'i.pinimg.com/originals/', $og) ?? $og;
         return [self::unique([$orig, $og])];
+    }
+
+    public static function pinImages(string $html, string $url = ''): array
+    {
+        if (!preg_match('#<script[^>]+id="__PWS_(?:INITIAL_PROPS|DATA)__"[^>]*>(.*?)</script>#s', $html, $m)) {
+            return [];
+        }
+        $j = json_decode($m[1], true);
+        if (!is_array($j)) {
+            return [];
+        }
+        $pinId = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1] : '';
+        $found = null;
+        $walk  = static function ($node) use (&$walk, &$found, $pinId): void {
+            if ($found !== null || !is_array($node)) {
+                return;
+            }
+            if (isset($node['carousel_data']['carousel_slots']) && is_array($node['carousel_data']['carousel_slots'])
+                && ($pinId === '' || (string) ($node['id'] ?? '') === $pinId)) {
+                $found = $node['carousel_data']['carousel_slots'];
+                return;
+            }
+            foreach ($node as $v) {
+                $walk($v);
+            }
+        };
+        $walk($j);
+        $out = [];
+        foreach ((array) $found as $slot) {
+            $imgs = (array) ($slot['images'] ?? []);
+            $c    = [];
+            foreach (['originals', 'orig'] as $k) {
+                if (!empty($imgs[$k]['url'])) {
+                    $c[] = (string) $imgs[$k]['url'];
+                }
+            }
+            uasort($imgs, static fn($a, $b) => (int) ($b['width'] ?? 0) <=> (int) ($a['width'] ?? 0));
+            foreach ($imgs as $img) {
+                if (!empty($img['url'])) {
+                    $c[] = (string) $img['url'];
+                }
+            }
+            $c = self::unique($c);
+            if ($c) {
+                $out[] = $c;
+            }
+        }
+        return array_slice($out, 0, self::MAX);
     }
 
     private static function twitter(string $url): array

@@ -3,7 +3,7 @@
 final class Switches
 {
     public const TOOLS = [
-        'ai'       => '🧠 هوش مصنوعی (چت)',
+        'ai'       => '🧠 هوش مصنوعی',
         'image'    => '🎨 ساخت عکس',
         'translate' => '🌐 ترجمه',
         'search'   => '🔍 سرچ گوگل',
@@ -41,18 +41,13 @@ final class Switches
 
     private const GAME_KEYS = ['chess', 'ttt', 'c4', 'rps', 'math'];
 
-    private static ?array $off = null;
-
     private static function load(): array
     {
-        if (self::$off !== null) {
-            return self::$off;
-        }
         $raw = (array) Store::get('cfg', 'tools_off', []);
         if (in_array('games', $raw, true)) {
             $raw = array_merge($raw, self::GAME_KEYS);
         }
-        return self::$off = array_values(array_unique(array_filter($raw, static fn($k) => isset(self::TOOLS[$k]))));
+        return array_values(array_unique(array_filter($raw, static fn($k) => isset(self::TOOLS[$k]))));
     }
 
     public static function on(string $key): bool
@@ -68,14 +63,12 @@ final class Switches
         $off = self::load();
         $off = in_array($key, $off, true) ? array_values(array_diff($off, [$key])) : array_merge($off, [$key]);
         Store::set('cfg', 'tools_off', $off);
-        self::$off = $off;
     }
 
     public static function setAll(bool $on): void
     {
         $off = $on ? [] : array_keys(self::TOOLS);
         Store::set('cfg', 'tools_off', $off);
-        self::$off = $off;
     }
 
     public static function syncCommands(): void
@@ -104,8 +97,8 @@ final class Switches
     public static function text(): string
     {
         $off = self::load();
-        return "<b>🧰 مدیریت ابزارها</b>\n\nروی هر دکمه بزنی روشن/خاموش می‌شه.\nروشن · ⛔ خاموش"
-            . ($off ? "\n\n⛔ خاموش: " . fa((string) count($off)) . ' از ' . fa((string) count(self::TOOLS)) : '');
+        return "<b>🧰 مدیریت ابزارها</b>\n\nروی هر دکمه بزنی روشن/خاموش می‌شه.\nسبز = روشن · قرمز = خاموش"
+            . ($off ? "\n\nخاموش: " . fa((string) count($off)) . ' از ' . fa((string) count(self::TOOLS)) : '');
     }
 
     public static function keyboard(): array
@@ -114,7 +107,7 @@ final class Switches
         $row  = [];
         foreach (self::TOOLS as $k => $label) {
             $on    = self::on($k);
-            $row[] = btn(($on ? '' : '⛔ ') . $label, 'tl:t:' . $k, $on ? 'success' : 'danger');
+            $row[] = btn($label, 'tl:t:' . $k, $on ? 'success' : 'danger');
             if (count($row) === 2) {
                 $rows[] = $row;
                 $row    = [];
@@ -123,7 +116,7 @@ final class Switches
         if ($row) {
             $rows[] = $row;
         }
-        $rows[] = [btn('روشن‌کردن همه', 'tl:all:1', null), btn('⛔ خاموش‌کردن همه', 'tl:all:0', null)];
+        $rows[] = [btn('روشن‌کردن همه', 'tl:all:1', null), btn('خاموش‌کردن همه', 'tl:all:0', null)];
         return ikb($rows);
     }
 

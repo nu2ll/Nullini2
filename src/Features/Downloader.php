@@ -6,6 +6,9 @@ final class Downloader
     private const DAILY    = 20;
     private const SLOTS    = 2;
     private const TMP      = '/tmp/nullini-dl';
+    private const ALBUM_MAX = 10;
+    private const AUTO_DELAY = 30;
+    private const MULTI    = ['instagram', 'pinterest', 'twitter', 'tiktok', 'reddit', 'facebook', 'snapchat'];
 
     private const SITES = [
         'youtube'     => ['یوتیوب', '/(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/', true],
@@ -163,7 +166,7 @@ final class Downloader
             return;
         }
         $tg->action($msg['chat']['id'], 'typing');
-        self::prepare(['chat' => $msg['chat']['id'], 'card' => $mid, 'imid' => null], $link, $uid, (int) $msg['message_id'], $msg);
+        self::prepare(['chat' => $msg['chat']['id'], 'card' => $mid, 'imid' => null, 'group' => ($msg['chat']['type'] ?? 'private') !== 'private'], $link, $uid, (int) $msg['message_id'], $msg);
     }
 
     public static function guest(array $from, array $link, string $imid): void
@@ -258,14 +261,21 @@ final class Downloader
         $photos = static fn() => $sp === null && Photos::supports($link['site'])
             && ($msg !== null ? Photos::deliver($msg, $link, (int) $t['card']) : Photos::inline($link, (string) $t['imid'], $t['chat'], $uid));
 
-        $p = self::probe($link['url']);
+        $multi = $sp === null && empty($t['imid']) && in_array($link['site'], self::MULTI, true);
+        $p     = self::probe($link['url'], $multi);
         if (isset($p['error'])) {
             if (!$photos()) {
                 self::show($t, $p['error']);
             }
             return;
         }
-        $info = $p['info'];
+        $info  = $p['info'];
+        $count = (int) ($info['count'] ?? 1);
+        if ($multi && $count > 1 && (in_array('v', (array) ($info['kinds'] ?? []), true) || !Photos::supports($link['site']))) {
+            $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
+            self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));
+            return;
+        }
         if (!self::hasVideo($info) && $sp === null && Photos::supports($link['site']) && $photos()) {
             return;
         }
@@ -286,10 +296,13 @@ final class Downloader
 
         $hasVideo = self::SITES[$link['site']][2] && self::hasVideo($info);
         $token    = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, $t['imid']);
-        self::show($t, self::cardText($info, $link, $hasVideo), self::cardKeyboard($token, $link['site'], $info, $hasVideo, self::limit($t)), self::preview($info));
+        $auto     = $hasVideo && $sp === null && !empty($t['group']) && empty($t['imid']) && (int) ($info['count'] ?? 1) <= 1
+            ? self::armAuto($token, self::options($link['site'], $info, true, self::limit($t))[0][0] ?? 'hd')
+            : false;
+        self::show($t, self::cardText($info, $link, $hasVideo) . ($auto ? "\n\n⏱ اگه تا " . fa((string) self::AUTO_DELAY) . " ثانیه‌ی دیگه چیزی انتخاب نکنی،\nخودکار با بالاترین کیفیت دانلود می‌شه." : ''), self::cardKeyboard($token, $link['site'], $info, $hasVideo, self::limit($t)), self::preview($info));
     }
 
-    private static function newJob(array $link, array $info, int $uid, int|string $chat, int $card, int $replyTo, ?string $imid = null): string
+    private static function newJob(array $link, array $info, int $uid, int|string $chat, int $card, int $replyTo, ?string $imid = null, int $count = 1): string
     {
         $token = bin2hex(random_bytes(6));
         Store::set('dl', $token, [
@@ -305,8 +318,38 @@ final class Downloader
             'card'     => $card,
             'reply_to' => $replyTo,
             'imid'     => $imid,
+            'count'    => $count,
         ]);
         return $token;
+    }
+
+    private static function armAuto(string $token, string $fmt): bool
+    {
+        $job = Store::get('dl', $token);
+        if (!is_array($job) || !function_exists('exec') || in_array('exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
+            return false;
+        }
+        $job['auto'] = $fmt;
+        Store::set('dl', $token, $job);
+        $cmd = '(sleep ' . self::AUTO_DELAY . '; timeout -k 10 ' . self::jobTime() . ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(NULLINI_ROOT . '/bot.php')
+            . ' --autodl ' . escapeshellarg($token) . ' ' . App::botIndex() . ') > /dev/null 2>&1 &';
+        exec($cmd, $o, $code);
+        return $code === 0;
+    }
+
+    public static function auto(string $token): void
+    {
+        $job = Store::get('dl', $token);
+        if (!is_array($job) || empty($job['auto'])) {
+            return;
+        }
+        if (Store::update('dl_claim', $token, static fn($v) => $v ? null : time()) === null) {
+            return;
+        }
+        $r = self::begin($token, (string) $job['auto'], (int) $job['owner']);
+        if (isset($r['error'])) {
+            self::show($job, $r['error']);
+        }
     }
 
     public static function charge(int $uid): void
@@ -355,7 +398,7 @@ final class Downloader
 
     public static function begin(string $token, string $fmt, int $uid): array
     {
-        if (!preg_match('/^(fhd|hd|sd|mp3|v\d{3,4})$/', $fmt) || !preg_match('/^[a-f0-9]{6,32}$/', $token)) {
+        if (!preg_match('/^(fhd|hd|sd|mp3|all|v\d{3,4})$/', $fmt) || !preg_match('/^[a-f0-9]{6,32}$/', $token)) {
             return ['error' => '⌛️ منقضی شده؛' . "\n" . 'لینک رو دوباره بفرست.'];
         }
         $tg  = App::tg();
@@ -366,6 +409,7 @@ final class Downloader
         if ($uid !== (int) $job['owner'] && !App::isAdmin($uid)) {
             return ['error' => '🙅 این دکمه مال کسیه که لینک رو فرستاده؛' . "\n" . 'لینک خودت رو بفرست 🙂'];
         }
+        Store::set('dl_claim', $token, time());
         $cached = Store::get('dl_files', self::cacheKey($job['url'], $fmt));
         if (is_array($cached) && (!empty($job['imid']) ? self::toInline($job, $cached) : self::sendCached($job, $cached))) {
             if ($job['card'] && empty($job['imid'])) {
@@ -455,6 +499,31 @@ final class Downloader
         return ikb($rows);
     }
 
+    private static function albumText(array $info, array $link, int $count): string
+    {
+        $title = mb_substr((string) ($info['title'] ?? ''), 0, 3500);
+        $who   = (string) ($info['uploader'] ?? $info['channel'] ?? '');
+        $kinds = array_count_values((array) ($info['kinds'] ?? []));
+        $parts = [];
+        if (!empty($kinds['v'])) {
+            $parts[] = fa((string) $kinds['v']) . ' ویدیو';
+        }
+        if (!empty($kinds['p'])) {
+            $parts[] = fa((string) $kinds['p']) . ' عکس';
+        }
+        return '📚 <b>' . h($title !== '' ? $title : 'بدون عنوان') . "</b>\n"
+            . ($who !== '' ? '👤 ' . h(mb_substr($who, 0, 40)) . ' · ' : '') . '📍 ' . $link['name'] . "\n\n"
+            . '🎞 این پست ' . fa((string) $count) . ' تا فایل داره' . ($parts ? ' (' . implode(' و ', $parts) . ')' : '') . "؛\nهمه‌شون رو بفرستم؟ 👇";
+    }
+
+    private static function albumKeyboard(string $token, int $count): array
+    {
+        return ikb([
+            [btn('📥 دانلود همه (' . fa((string) $count) . ' تا)', "dl:{$token}:all", 'success')],
+            [btn('✖️ بیخیال', "dl:{$token}:x", null)],
+        ]);
+    }
+
     private static function sizeHint(array $info, int $h): string
     {
         $mb = self::estimate($info, $h) / 1048576;
@@ -487,7 +556,7 @@ final class Downloader
     public static function onCallback(array $cq, string $data): void
     {
         $tg = App::tg();
-        if (!preg_match('/^dl:([a-f0-9]{12}):(fhd|hd|sd|mp3|x|v\d{3,4})$/', $data, $m)) {
+        if (!preg_match('/^dl:([a-f0-9]{12}):(fhd|hd|sd|mp3|all|x|v\d{3,4})$/', $data, $m)) {
             $tg->answer($cq);
             return;
         }
@@ -553,6 +622,10 @@ final class Downloader
             self::rmrf($dir);
             @mkdir($dir, 0775, true);
 
+            if ($fmt === 'all') {
+                self::workAlbum($job, $token, $dir);
+                return;
+            }
             self::show($job, self::stageText($job, self::bar(0) . ' ۰٪'));
             $limit = self::limit($job);
             $last  = 0.0;
@@ -637,6 +710,138 @@ final class Downloader
                 fclose($slot);
             }
         }
+    }
+
+    public static function albumFiles(string $dir): array
+    {
+        $files = (array) glob($dir . '/*');
+        natsort($files);
+        $out = [];
+        foreach ($files as $f) {
+            $ext = strtolower(pathinfo((string) $f, PATHINFO_EXTENSION));
+            if (!is_file($f) || str_contains((string) $f, '.part') || (int) filesize($f) <= 0) {
+                continue;
+            }
+            if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                $out[] = ['photo', $f];
+            } elseif (in_array($ext, ['mp4', 'mov', 'm4v', 'webm', 'mkv'], true)) {
+                $out[] = ['video', $f];
+            }
+        }
+        return $out;
+    }
+
+    private static function workAlbum(array $job, string $token, string $dir): void
+    {
+        $tg    = App::tg();
+        $chat  = $job['chat'];
+        $total = max(2, (int) ($job['count'] ?? 2));
+        $limit = self::limit($job);
+        $last  = 0.0;
+        self::show($job, self::stageText($job, '⏳ دارم ' . fa((string) $total) . ' تا فایل رو می‌گیرم...'));
+        $res = self::run(array_merge([self::bin()], self::commonArgs(), [
+            '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<44M]+ba[filesize<5M]/b[filesize<49M]/bv*+ba/b', '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
+            '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
+            '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
+            '--max-filesize', (int) ($limit / 1048576) - 1 . 'M',
+            '-o', $dir . '/%(playlist_index)02d_%(id).30s.%(ext)s',
+            $job['url'],
+        ]), self::jobTime() - 60, static function (string $line) use ($job, $total, &$last): void {
+            if (preg_match('/Downloading item (\d+) of (\d+)/', $line, $m) && microtime(true) - $last >= 2.5) {
+                $n = min((int) $m[2], self::ALBUM_MAX);
+                self::show($job, self::stageText($job, '📦 فایل ' . fa($m[1]) . ' از ' . fa((string) $n) . "\n" . self::bar((int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . ' ' . fa((string) (int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . '٪'));
+                $last = microtime(true);
+            }
+        });
+
+        $items   = [];
+        $big     = [];
+        $skipped = 0;
+        foreach (self::albumFiles($dir) as [$kind, $f]) {
+            $size = (int) filesize($f);
+            if ($size > $limit) {
+                $skipped++;
+            } elseif ($size > self::BOT_API_BYTES || ($kind === 'photo' && $size > 10 * 1048576)) {
+                $big[] = [$kind, $f];
+            } else {
+                $items[] = [$kind, $f];
+            }
+        }
+        if (!$items && !$big) {
+            logError('dl', "{$job['site']} album failed (exit {$res['code']}): " . self::lastLine($res['err']));
+            self::show($job, self::explain($res['err'] . "\n" . $res['out'], $res['code']), self::retryKeyboard($token, 'all'));
+            return;
+        }
+
+        self::show($job, self::stageText($job, '📤 دارم می‌فرستمشون... (' . fa((string) (count($items) + count($big))) . ' تا)'));
+        $tg->action($chat, 'upload_document');
+        $reply = $job['reply_to'] ? ['message_id' => (int) $job['reply_to'], 'allow_sending_without_reply' => true] : null;
+        $cap   = self::caption($job);
+        $ok    = false;
+
+        if (count($items) >= 2) {
+            $media  = [];
+            $params = ['chat_id' => $chat, 'reply_parameters' => $reply];
+            foreach ($items as $i => [$kind, $f]) {
+                $m = ['type' => $kind, 'media' => "attach://f{$i}"];
+                if ($kind === 'video') {
+                    $meta = self::videoMeta($f);
+                    $m   += ['supports_streaming' => true, 'width' => $meta['width'] ?: null, 'height' => $meta['height'] ?: null, 'duration' => $meta['duration'] ?: null];
+                    $m    = array_filter($m, static fn($v) => $v !== null);
+                }
+                if ($i === 0) {
+                    $m += ['caption' => $cap, 'parse_mode' => 'HTML'];
+                }
+                $media[]         = $m;
+                $params["f{$i}"] = new CURLFile($f, $kind === 'photo' ? 'image/jpeg' : 'video/mp4', basename($f));
+            }
+            $params['media'] = $media;
+            $r  = $tg->call('sendMediaGroup', $params, 300);
+            $ok = !empty($r['ok']);
+        }
+        if (!$ok) {
+            foreach ($items as $i => [$kind, $f]) {
+                $r = $tg->call($kind === 'photo' ? 'sendPhoto' : 'sendVideo', [
+                    'chat_id'          => $chat,
+                    $kind              => new CURLFile($f, $kind === 'photo' ? 'image/jpeg' : 'video/mp4', basename($f)),
+                    'caption'          => $i === 0 ? $cap : null,
+                    'parse_mode'       => 'HTML',
+                    'reply_parameters' => $reply,
+                ], 300);
+                $ok = !empty($r['ok']) || $ok;
+            }
+        }
+        foreach ($big as $i => [$kind, $f]) {
+            $size = (int) filesize($f);
+            $sent = null;
+            if ($size > self::BOT_API_BYTES) {
+                $sent = self::uploadMtproto($job, 'hd', $f, $kind === 'video' ? self::videoMeta($f) : [], $dir);
+            } else {
+                $r    = $tg->call('sendDocument', [
+                    'chat_id'          => $chat,
+                    'document'         => new CURLFile($f, 'application/octet-stream', basename($f)),
+                    'caption'          => !$ok && $i === 0 && !$items ? $cap : null,
+                    'parse_mode'       => 'HTML',
+                    'reply_parameters' => $reply,
+                ], 300);
+                $sent = !empty($r['ok']) ? $r : null;
+            }
+            if ($sent !== null) {
+                $ok = true;
+            } else {
+                $skipped++;
+            }
+        }
+        if (!$ok) {
+            self::show($job, '❌ آپلود تو تلگرام نشد؛' . "\n" . 'یه بار دیگه امتحان کن.', self::retryKeyboard($token, 'all'));
+            return;
+        }
+        if ($skipped > 0) {
+            $tg->send($chat, '📦 ' . fa((string) $skipped) . ' تا از فایل‌ها از سقف حجم (' . self::limitText() . ') بیشتر بود یا آپلودشون نشد.', ['reply_parameters' => $reply]);
+        }
+        self::charge((int) $job['owner']);
+        Users::hit('dl:' . $job['site'] . ':album');
+        $tg->call('deleteMessage', ['chat_id' => $chat, 'message_id' => (int) $job['card']], 8);
     }
 
     private static function formatArgs(string $fmt, bool $small = false): array
@@ -876,15 +1081,15 @@ final class Downloader
         return !empty($r['ok']);
     }
 
-    public static function probe(string $url): array
+    public static function probe(string $url, bool $multi = false): array
     {
-        $key = 'dl_probe:' . md5($url);
+        $key = 'dl_probe:' . md5($url) . ($multi ? ':m' : '');
         $hit = Store::get('cache', $key);
         if (is_array($hit) && time() - (int) ($hit['at'] ?? 0) < 1800) {
             return ['info' => $hit['v']];
         }
         $res = self::run(array_merge([self::bin()], self::commonArgs(), [
-            '-J', '--no-playlist', '--no-warnings', '--skip-download', '--socket-timeout', '15', '--playlist-items', '1', $url,
+            '-J', '--no-playlist', '--no-warnings', '--skip-download', '--socket-timeout', '15', '--playlist-items', $multi ? '1:' . self::ALBUM_MAX : '1', $url,
         ]), 60);
         $info = json_decode($res['out'], true);
         if (!is_array($info)) {
@@ -892,20 +1097,44 @@ final class Downloader
             return ['error' => self::explain($res['err'], $res['code'])];
         }
         if (($info['_type'] ?? '') === 'playlist') {
-            $first = $info['entries'][0] ?? null;
+            $entries = array_values(array_filter((array) ($info['entries'] ?? []), 'is_array'));
+            $first   = $entries[0] ?? null;
             if (!is_array($first)) {
                 return ['error' => '🤷 تو این لینک چیزی برای دانلود پیدا نکردم.'];
             }
             $first['title'] ??= $info['title'] ?? '';
-            $first['webpage_url'] ??= $url;
+            $first['uploader'] ??= $info['uploader'] ?? null;
+            $first['webpage_url'] = (string) ($info['webpage_url'] ?? $first['webpage_url'] ?? $url);
+            $first['thumbnail'] ??= $info['thumbnail'] ?? null;
+            if ($multi && count($entries) > 1) {
+                $first['count'] = count($entries);
+                $first['kinds'] = array_map([self::class, 'entryKind'], $entries);
+            }
             $info = $first;
         }
         $slim = array_intersect_key($info, array_flip(['title', 'uploader', 'channel', 'uploader_id', 'duration', 'thumbnail', 'webpage_url',
-            'is_live', 'live_status', 'width', 'height', 'vcodec']));
+            'is_live', 'live_status', 'width', 'height', 'vcodec', 'count', 'kinds']));
         $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'vcodec', 'filesize', 'filesize_approx'])),
             array_values((array) ($info['formats'] ?? [])));
         Store::set('cache', $key, ['at' => time(), 'v' => $slim]);
         return ['info' => $slim];
+    }
+
+    public static function entryKind(array $e): string
+    {
+        $ext = strtolower((string) ($e['ext'] ?? ''));
+        if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+            return 'p';
+        }
+        if (in_array($ext, ['mp4', 'mov', 'm4v', 'webm', 'mkv'], true) || !empty($e['duration'])) {
+            return 'v';
+        }
+        foreach ((array) ($e['formats'] ?? []) as $f) {
+            if (($f['vcodec'] ?? 'none') !== 'none') {
+                return 'v';
+            }
+        }
+        return 'p';
     }
 
     private static function run(array $args, int $timeout, ?callable $onLine = null, array $env = []): array
@@ -982,6 +1211,10 @@ final class Downloader
     private static function retryKeyboard(string $token, string $fmt): array
     {
         $rows = [[btn('🔁 دوباره', "dl:{$token}:{$fmt}", 'primary')]];
+        if ($fmt === 'all') {
+            $rows[] = [btn('✖️ بیخیال', "dl:{$token}:x", null)];
+            return ikb($rows);
+        }
         if ($fmt !== 'mp3') {
             $rows[0][] = btn('🎵 فقط صدا', "dl:{$token}:mp3", null);
         }
