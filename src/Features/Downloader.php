@@ -6,7 +6,8 @@ final class Downloader
     private const DAILY    = 20;
     private const SLOTS    = 2;
     private const TMP      = '/tmp/nullini-dl';
-    private const ALBUM_MAX = 10;
+    private const ALBUM_MAX = 20;
+    private const GROUP_MAX = 10;
     private const AUTO_DELAY = 30;
     private const MULTI    = ['instagram', 'pinterest', 'twitter', 'tiktok', 'reddit', 'facebook', 'snapchat'];
 
@@ -258,8 +259,8 @@ final class Downloader
             $link['url'] = $hit;
         }
 
-        $photos = static fn() => $sp === null && Photos::supports($link['site'])
-            && ($msg !== null ? Photos::deliver($msg, $link, (int) $t['card']) : Photos::inline($link, (string) $t['imid'], $t['chat'], $uid));
+        $photos = static fn(int $expect = 0) => $sp === null && Photos::supports($link['site'])
+            && ($msg !== null ? Photos::deliver($msg, $link, (int) $t['card'], $expect) : Photos::inline($link, (string) $t['imid'], $t['chat'], $uid));
 
         $multi = $sp === null && empty($t['imid']) && in_array($link['site'], self::MULTI, true);
         $p     = self::probe($link['url'], $multi);
@@ -271,12 +272,18 @@ final class Downloader
         }
         $info  = $p['info'];
         $count = (int) ($info['count'] ?? 1);
-        if ($multi && $count > 1) {
+        if ($multi && $count > 1 && (in_array('v', (array) ($info['kinds'] ?? []), true) || !Photos::supports($link['site']))) {
             $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
             self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));
             return;
         }
-        if (!self::hasVideo($info) && $sp === null && Photos::supports($link['site']) && $photos()) {
+        $expect = $multi && $count > 1 ? min($count, self::ALBUM_MAX) : 0;
+        if (!self::hasVideo($info) && $sp === null && Photos::supports($link['site']) && $photos($expect)) {
+            return;
+        }
+        if ($expect > 1) {
+            $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
+            self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));
             return;
         }
         if ($sp !== null) {
@@ -779,36 +786,51 @@ final class Downloader
         $cap   = self::caption($job);
         $ok    = false;
 
+        $rest  = $items;
+        $first = true;
         if (count($items) >= 2) {
-            $media  = [];
-            $params = ['chat_id' => $chat, 'reply_parameters' => $reply];
-            foreach ($items as $i => [$kind, $f]) {
-                $m = ['type' => $kind, 'media' => "attach://f{$i}"];
-                if ($kind === 'video') {
-                    $meta = self::videoMeta($f);
-                    $m   += ['supports_streaming' => true, 'width' => $meta['width'] ?: null, 'height' => $meta['height'] ?: null, 'duration' => $meta['duration'] ?: null];
-                    $m    = array_filter($m, static fn($v) => $v !== null);
+            $rest = [];
+            foreach (array_chunk($items, self::GROUP_MAX) as $chunk) {
+                if (count($chunk) < 2) {
+                    array_push($rest, ...$chunk);
+                    continue;
                 }
-                if ($i === 0) {
-                    $m += ['caption' => $cap, 'parse_mode' => 'HTML'];
+                $media  = [];
+                $params = ['chat_id' => $chat, 'reply_parameters' => $reply];
+                foreach ($chunk as $i => [$kind, $f]) {
+                    $m = ['type' => $kind, 'media' => "attach://f{$i}"];
+                    if ($kind === 'video') {
+                        $meta = self::videoMeta($f);
+                        $m   += ['supports_streaming' => true, 'width' => $meta['width'] ?: null, 'height' => $meta['height'] ?: null, 'duration' => $meta['duration'] ?: null];
+                        $m    = array_filter($m, static fn($v) => $v !== null);
+                    }
+                    if ($i === 0 && $first) {
+                        $m += ['caption' => $cap, 'parse_mode' => 'HTML'];
+                    }
+                    $media[]         = $m;
+                    $params["f{$i}"] = new CURLFile($f, $kind === 'photo' ? 'image/jpeg' : 'video/mp4', basename($f));
                 }
-                $media[]         = $m;
-                $params["f{$i}"] = new CURLFile($f, $kind === 'photo' ? 'image/jpeg' : 'video/mp4', basename($f));
+                $params['media'] = $media;
+                $r = $tg->call('sendMediaGroup', $params, 300);
+                if (!empty($r['ok'])) {
+                    $ok    = true;
+                    $first = false;
+                } else {
+                    array_push($rest, ...$chunk);
+                }
             }
-            $params['media'] = $media;
-            $r  = $tg->call('sendMediaGroup', $params, 300);
-            $ok = !empty($r['ok']);
         }
-        if (!$ok) {
-            foreach ($items as $i => [$kind, $f]) {
-                $r = $tg->call($kind === 'photo' ? 'sendPhoto' : 'sendVideo', [
-                    'chat_id'          => $chat,
-                    $kind              => new CURLFile($f, $kind === 'photo' ? 'image/jpeg' : 'video/mp4', basename($f)),
-                    'caption'          => $i === 0 ? $cap : null,
-                    'parse_mode'       => 'HTML',
-                    'reply_parameters' => $reply,
-                ], 300);
-                $ok = !empty($r['ok']) || $ok;
+        foreach ($rest as $i => [$kind, $f]) {
+            $r = $tg->call($kind === 'photo' ? 'sendPhoto' : 'sendVideo', [
+                'chat_id'          => $chat,
+                $kind              => new CURLFile($f, $kind === 'photo' ? 'image/jpeg' : 'video/mp4', basename($f)),
+                'caption'          => $first ? $cap : null,
+                'parse_mode'       => 'HTML',
+                'reply_parameters' => $reply,
+            ], 300);
+            if (!empty($r['ok'])) {
+                $ok    = true;
+                $first = false;
             }
         }
         foreach ($big as $i => [$kind, $f]) {

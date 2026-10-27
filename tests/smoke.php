@@ -277,27 +277,14 @@ check('dl explain bot', str_contains(Downloader::explain("ERROR: Sign in to conf
 check('dl explain size', str_contains(Downloader::explain('File is larger than max-filesize'), Downloader::limitText()), true);
 
 $pinHtml = '<html><script id="__PWS_DATA__" type="application/json">' . json_encode(['x' => [
-    ['id' => '999999999', 'carousel_data' => ['carousel_slots' => [['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/z.jpg', 'width' => 236]]]]]],
-    ['id' => '123456789', 'carousel_data' => ['carousel_slots' => [
+    ['id' => '999', 'carousel_data' => ['carousel_slots' => [['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/z.jpg', 'width' => 236]]]]]],
+    ['id' => '123', 'carousel_data' => ['carousel_slots' => [
         ['images' => ['236x' => ['url' => 'https://i.pinimg.com/236x/a.jpg', 'width' => 236], 'originals' => ['url' => 'https://i.pinimg.com/originals/a.jpg', 'width' => 1200]]],
         ['images' => ['736x' => ['url' => 'https://i.pinimg.com/736x/b.jpg', 'width' => 736]]],
     ]]],
 ]]) . '</script></html>';
-check('pin carousel count', count(Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123456789/')), 2);
-check('pin carousel original first', Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123456789/')[0][0], 'https://i.pinimg.com/originals/a.jpg');
-check('pin id feedback', Photos::pinId('https://www.pinterest.com/pin/736549714105737900/feedback/?invite_code=x'), '736549714105737900');
-check('pin id slug', Photos::pinId('https://www.pinterest.com/pin/cute-cat--123456789/'), '123456789');
-check('pin id none', Photos::pinId('https://pin.it/2mcOEklaj'), null);
-check('pin slots carousel', count(Photos::pinSlots(['carousel_data' => ['carousel_slots' => [
-    ['images' => ['orig' => ['url' => 'https://i.pinimg.com/originals/a.jpg', 'width' => 900]]],
-    ['images' => ['736x' => ['url' => 'https://i.pinimg.com/736x/b.jpg', 'width' => 736]]],
-]]])), 2);
-check('pin slots story', count(Photos::pinSlots(['story_pin_data' => ['pages' => [['blocks' => [
-    ['image' => ['images' => ['orig' => ['url' => 'https://i.pinimg.com/originals/c.jpg']]]],
-    ['type' => 'text'],
-    ['image' => ['images' => ['orig' => ['url' => 'https://i.pinimg.com/originals/d.jpg']]]],
-]]]]])), 2);
-check('pin slots single', Photos::pinSlots(['images' => ['orig' => ['url' => 'https://i.pinimg.com/originals/e.jpg'], '236x' => ['url' => 'https://i.pinimg.com/236x/e.jpg', 'width' => 236]]]), [['https://i.pinimg.com/originals/e.jpg', 'https://i.pinimg.com/236x/e.jpg']]);
+check('pin carousel count', count(Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123/')), 2);
+check('pin carousel original first', Photos::pinImages($pinHtml, 'https://www.pinterest.com/pin/123/')[0][0], 'https://i.pinimg.com/originals/a.jpg');
 check('pin carousel none', Photos::pinImages('<html></html>', ''), []);
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');

@@ -4,14 +4,15 @@ final class Photos
 {
     private const SITES = ['instagram', 'pinterest', 'twitter', 'reddit'];
     private const UA    = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
-    private const MAX   = 10;
+    private const MAX   = 20;
+    private const GROUP = 10;
 
     public static function supports(string $site): bool
     {
         return in_array($site, self::SITES, true);
     }
 
-    public static function deliver(array $msg, array $link, int $mid): bool
+    public static function deliver(array $msg, array $link, int $mid, int $expect = 0): bool
     {
         $tg   = App::tg();
         $chat = $msg['chat']['id'];
@@ -24,6 +25,10 @@ final class Photos
         }
         if (!$sets) {
             logInfo('photo', $link['site'] . ' no images found');
+            return false;
+        }
+        if ($expect > 1 && count($sets) < $expect) {
+            logInfo('photo', $link['site'] . ': found ' . count($sets) . ' of ' . $expect . ', falling back to yt-dlp');
             return false;
         }
         $tg->action($chat, 'upload_photo');
@@ -142,24 +147,21 @@ final class Photos
 
     private static function pinterest(string $url): array
     {
-        $r     = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
-        $html  = (string) ($r['body'] ?? '');
-        $final = (string) ($r['url'] ?? '');
-        $id    = self::pinId($final) ?? self::pinId($url);
-        if ($id === null && preg_match('#rel="canonical"[^>]*href="([^"]+)"#i', $html, $cm)) {
-            $id = self::pinId($cm[1]);
-        }
-        if ($id !== null) {
-            $sets = self::pinApi($id);
-            if ($sets) {
-                return $sets;
-            }
-        }
-        $car = self::pinImages($html, $final !== '' ? $final : $url);
+        $r    = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
+        $html = (string) ($r['body'] ?? '');
+        $car  = self::pinImages($html, $url);
         if (count($car) > 1) {
             return $car;
         }
-        $og = self::og($html);
+        $id = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1]
+            : (preg_match('#(?:rel="canonical"[^>]*href|og:url"[^>]*content)="[^"]*?/pin/(?:[\w-]*?--)?(\d+)#', $html, $pm) ? $pm[1] : '');
+        if ($id !== '') {
+            $car = self::pinApi($id);
+            if (count($car) > 1) {
+                return $car;
+            }
+        }
+        $og   = self::og($html);
         if ($og === '' && preg_match('#https://i\.pinimg\.com/originals/[\w/]+\.(?:jpe?g|png|gif|webp)#i', $html, $m)) {
             $og = $m[0];
         }
@@ -168,65 +170,6 @@ final class Photos
         }
         $orig = preg_replace('#i\.pinimg\.com/\d+x(?:\d+)?/#', 'i.pinimg.com/originals/', $og) ?? $og;
         return [self::unique([$orig, $og])];
-    }
-
-    public static function pinId(string $url): ?string
-    {
-        return preg_match('#/pin/(?:[\w-]*?--)?(\d{6,})#', $url, $m) ? $m[1] : null;
-    }
-
-    private static function pinApi(string $id): array
-    {
-        $data = json_encode(['options' => ['id' => $id, 'field_set_key' => 'detailed', 'noCache' => true], 'context' => new \stdClass()]);
-        $j    = Http::getJson('https://www.pinterest.com/resource/PinResource/get/?source_url=' . rawurlencode("/pin/{$id}/") . '&data=' . rawurlencode((string) $data), [
-            'User-Agent: ' . self::UA,
-            'Accept-Language: en-US,en;q=0.9',
-            'X-Requested-With: XMLHttpRequest',
-            'X-Pinterest-AppState: active',
-            'X-Pinterest-Source-Url: /pin/' . $id . '/',
-        ], 15);
-        $pin = $j['resource_response']['data'] ?? null;
-        return is_array($pin) ? self::pinSlots($pin) : [];
-    }
-
-    public static function pinSlots(array $pin): array
-    {
-        $sets = [];
-        foreach ((array) ($pin['carousel_data']['carousel_slots'] ?? []) as $slot) {
-            if ($c = self::imageCands((array) ($slot['images'] ?? []))) {
-                $sets[] = $c;
-            }
-        }
-        if (!$sets) {
-            foreach ((array) ($pin['story_pin_data']['pages'] ?? []) as $page) {
-                foreach ((array) ($page['blocks'] ?? []) as $b) {
-                    if ($c = self::imageCands((array) ($b['image']['images'] ?? []))) {
-                        $sets[] = $c;
-                    }
-                }
-            }
-        }
-        if (!$sets && ($c = self::imageCands((array) ($pin['images'] ?? [])))) {
-            $sets[] = $c;
-        }
-        return array_slice($sets, 0, self::MAX);
-    }
-
-    private static function imageCands(array $imgs): array
-    {
-        $c = [];
-        foreach (['originals', 'orig'] as $k) {
-            if (!empty($imgs[$k]['url'])) {
-                $c[] = (string) $imgs[$k]['url'];
-            }
-        }
-        uasort($imgs, static fn($a, $b) => (int) ($b['width'] ?? 0) <=> (int) ($a['width'] ?? 0));
-        foreach ($imgs as $img) {
-            if (is_array($img) && !empty($img['url'])) {
-                $c[] = (string) $img['url'];
-            }
-        }
-        return self::unique($c);
     }
 
     public static function pinImages(string $html, string $url = ''): array
@@ -238,7 +181,7 @@ final class Photos
         if (!is_array($j)) {
             return [];
         }
-        $pinId = self::pinId($url) ?? '';
+        $pinId = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1] : '';
         $found = null;
         $walk  = static function ($node) use (&$walk, &$found, $pinId): void {
             if ($found !== null || !is_array($node)) {
@@ -246,7 +189,7 @@ final class Photos
             }
             if (isset($node['carousel_data']['carousel_slots']) && is_array($node['carousel_data']['carousel_slots'])
                 && ($pinId === '' || (string) ($node['id'] ?? '') === $pinId)) {
-                $found = $node;
+                $found = $node['carousel_data']['carousel_slots'];
                 return;
             }
             foreach ($node as $v) {
@@ -254,7 +197,42 @@ final class Photos
             }
         };
         $walk($j);
-        return $found === null ? [] : self::pinSlots($found);
+        return self::slotUrls((array) $found);
+    }
+
+    private static function slotUrls(array $slots): array
+    {
+        $out = [];
+        foreach ($slots as $slot) {
+            $imgs = (array) ($slot['images'] ?? []);
+            $c    = [];
+            foreach (['originals', 'orig'] as $k) {
+                if (!empty($imgs[$k]['url'])) {
+                    $c[] = (string) $imgs[$k]['url'];
+                }
+            }
+            uasort($imgs, static fn($a, $b) => (int) ($b['width'] ?? 0) <=> (int) ($a['width'] ?? 0));
+            foreach ($imgs as $img) {
+                if (!empty($img['url'])) {
+                    $c[] = (string) $img['url'];
+                }
+            }
+            $c = self::unique($c);
+            if ($c) {
+                $out[] = $c;
+            }
+        }
+        return array_slice($out, 0, self::MAX);
+    }
+
+    private static function pinApi(string $id): array
+    {
+        $data = json_encode(['options' => ['id' => $id, 'field_set_key' => 'detailed'], 'context' => new \stdClass()]);
+        $j    = Http::getJson('https://www.pinterest.com/resource/PinResource/get/?source_url=' . rawurlencode("/pin/{$id}/") . '&data=' . rawurlencode((string) $data), [
+            'User-Agent: ' . self::UA, 'X-Requested-With: XMLHttpRequest', 'X-Pinterest-AppState: active', 'Accept-Language: en-US,en;q=0.9',
+        ], 15);
+        $slots = $j['resource_response']['data']['carousel_data']['carousel_slots'] ?? null;
+        return is_array($slots) ? self::slotUrls($slots) : [];
     }
 
     private static function twitter(string $url): array
@@ -385,23 +363,31 @@ final class Photos
             if (!$files) {
                 return false;
             }
-            $media  = [];
-            $params = ['chat_id' => $chat, 'reply_parameters' => ['message_id' => $replyTo, 'allow_sending_without_reply' => true]];
-            foreach ($files as $i => $f) {
-                $media[]       = ['type' => 'photo', 'media' => "attach://p{$i}"] + ($i === 0 ? ['caption' => $cap, 'parse_mode' => 'HTML'] : []);
-                $params["p{$i}"] = new CURLFile($f, 'image/jpeg', "p{$i}.jpg");
-            }
             if (count($files) === 1) {
                 return App::tg()->sendPhotoBytes($chat, (string) file_get_contents($files[0]), $cap, $replyTo);
             }
-            $params['media'] = $media;
-            $r = App::tg()->call('sendMediaGroup', $params, 180);
-            if (!empty($r['ok'])) {
-                return true;
-            }
             $ok = false;
-            foreach ($files as $i => $f) {
-                $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($f), $i === 0 ? $cap : '', $replyTo) || $ok;
+            foreach (array_chunk($files, self::GROUP) as $g => $chunk) {
+                $capG = $g === 0 ? $cap : '';
+                if (count($chunk) === 1) {
+                    $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($chunk[0]), $capG, $replyTo) || $ok;
+                    continue;
+                }
+                $media  = [];
+                $params = ['chat_id' => $chat, 'reply_parameters' => ['message_id' => $replyTo, 'allow_sending_without_reply' => true]];
+                foreach ($chunk as $i => $f) {
+                    $media[]         = ['type' => 'photo', 'media' => "attach://p{$i}"] + ($i === 0 && $capG !== '' ? ['caption' => $capG, 'parse_mode' => 'HTML'] : []);
+                    $params["p{$i}"] = new CURLFile($f, 'image/jpeg', "p{$i}.jpg");
+                }
+                $params['media'] = $media;
+                $r = App::tg()->call('sendMediaGroup', $params, 180);
+                if (!empty($r['ok'])) {
+                    $ok = true;
+                    continue;
+                }
+                foreach ($chunk as $i => $f) {
+                    $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($f), $i === 0 ? $capG : '', $replyTo) || $ok;
+                }
             }
             return $ok;
         } finally {
