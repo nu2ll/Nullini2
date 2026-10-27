@@ -51,7 +51,6 @@ final class MessageHandler
             $bare = preg_replace('/^' . self::TRIGGER . '[\s،,:]*/u', '', mbTrim($bare)) ?? $bare;
             $link = Downloader::match($bare);
         }
-        // ریپلای روی پیام ابزارها (دانلودر، تاس، هوا، روست و...) به هوش مصنوعی نره؛ مگه اسم/منشنِ ربات توش باشه
         $toolReply = self::isReplyToBot($msg)
             && !AI::isAiMsg($msg['chat']['id'], (int) ($msg['reply_to_message']['message_id'] ?? 0))
             && !$mentioned && !$startsWithName;

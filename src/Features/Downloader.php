@@ -455,15 +455,6 @@ final class Downloader
         return ikb($rows);
     }
 
-    private static function maxHeight(array $info): int
-    {
-        $max = (int) ($info['height'] ?? 0);
-        foreach ((array) ($info['formats'] ?? []) as $f) {
-            $max = max($max, (int) ($f['height'] ?? 0));
-        }
-        return $max;
-    }
-
     private static function sizeHint(array $info, int $h): string
     {
         $mb = self::estimate($info, $h) / 1048576;

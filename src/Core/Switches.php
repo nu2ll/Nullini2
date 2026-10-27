@@ -1,6 +1,5 @@
 <?php
 
-/** روشن/خاموش کردن ابزارها از پنل ادمین (/tools). کلیدها با اسم Intent هم‌نامن. */
 final class Switches
 {
     public const TOOLS = [
@@ -32,7 +31,6 @@ final class Switches
         'math'     => '🔢 دوئل ریاضی',
     ];
 
-    /** دستورهای منوی تلگرام که به هر سوییچ وصلن (خاموش شد، از منو حذف می‌شه) */
     public const COMMAND_SWITCH = [
         'img' => 'image', 'image' => 'image',
         'tr'  => 'translate', 'translate' => 'translate',
@@ -52,7 +50,6 @@ final class Switches
         }
         $raw = (array) Store::get('cfg', 'tools_off', []);
         if (in_array('games', $raw, true)) {
-            // سوییچ قدیمی «بازی‌ها» → هر پنج بازی خاموش
             $raw = array_merge($raw, self::GAME_KEYS);
         }
         return self::$off = array_values(array_unique(array_filter($raw, static fn($k) => isset(self::TOOLS[$k]))));
@@ -81,7 +78,6 @@ final class Switches
         self::$off = $off;
     }
 
-    /** منوی دستورهای تلگرام رو با وضعیت فعلی سوییچ‌ها دوباره می‌سازه */
     public static function syncCommands(): void
     {
         try {
@@ -100,7 +96,6 @@ final class Switches
         }
     }
 
-    /** اگه خاموش باشه بی‌صدا false برمی‌گردونه (هیچ پیامی نمی‌ره) */
     public static function guard(string $key): bool
     {
         return self::on($key);

@@ -6,11 +6,6 @@ final class ImageGen
     private static ?string $failMsg  = null;
     private static bool    $quotaOut = false;
 
-    public static function notice(): ?string
-    {
-        return self::$notice;
-    }
-
     public static function failText(): string
     {
         if (self::$failMsg !== null) {

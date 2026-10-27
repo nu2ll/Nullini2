@@ -123,11 +123,6 @@ final class Giveaway
             "<b>🎁 قرعه‌کشی</b>\n\n⏳ دارم آماده‌اش می‌کنم...", ikb([[btn('⏳ صبر کن...', 'noop', null)]]));
     }
 
-    private static function span(int $s): string
-    {
-        return $s >= 86400 ? fa(round($s / 86400, 1)) . ' روز' : ($s >= 3600 ? fa(round($s / 3600, 1)) . ' ساعت' : fa(intdiv($s, 60)) . ' دقیقه');
-    }
-
     private static function inlineKeyboard(array $g, string $ask = ''): array
     {
         $id = $g['id'];

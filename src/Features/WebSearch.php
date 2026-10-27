@@ -1,10 +1,5 @@
 <?php
 
-/**
- * سرچ وب با Tavily — به‌عنوان «ابزار» (function calling) به Gemini داده می‌شه.
- * خود مدل تصمیم می‌گیره سرچ لازمه یا نه؛ پرامپت سیستم هیچ تغییری نمی‌کنه.
- * کلیدها: TAVILY_KEYS (چند تا با کاما/فاصله)
- */
 final class WebSearch
 {
     public const MAX_ROUNDS = 10;
@@ -21,7 +16,6 @@ final class WebSearch
         return self::keys() !== [];
     }
 
-    /** تعریف ابزار برای Gemini */
     public static function declaration(): array
     {
         return [
@@ -37,7 +31,6 @@ final class WebSearch
         ];
     }
 
-    /** نتیجه‌ی سرچ به‌صورت متن برای برگردوندن به مدل */
     public static function run(string $q, float $deadline): string
     {
         $q = trim(mb_substr($q, 0, 200));
@@ -91,7 +84,6 @@ final class WebSearch
                 ];
             }
             logWarn('search', "tavily key{$i} HTTP {$r['code']}: " . mb_substr((string) ($r['data']['detail']['error'] ?? $r['raw']), 0, 160));
-            // کلید نامعتبر / سهمیه‌ی تموم‌شده / محدودیت → کلید بعدی
             if (!in_array($r['code'], [0, 401, 403, 429, 432, 433, 500, 502, 503, 504], true)) {
                 return null;
             }

@@ -146,50 +146,6 @@ final class Weather
         };
     }
 
-    public static function toArray(array $d): array
-    {
-        $w     = $d['raw'];
-        $cur   = $w['current'];
-        $daily = $w['daily'];
-        $code  = (int) ($cur['weather_code'] ?? 0);
-        $isDay = !empty($cur['is_day']);
-        $days  = [];
-        foreach (['امروز', 'فردا', 'پس‌فردا'] as $i => $name) {
-            if (!isset($daily['temperature_2m_max'][$i])) {
-                continue;
-            }
-            $c      = (int) ($daily['weather_code'][$i] ?? 0);
-            $days[] = [
-                'name'  => $name,
-                'emoji' => self::codeEmoji($c),
-                'text'  => self::codeText($c),
-                'max'   => (int) round((float) $daily['temperature_2m_max'][$i]),
-                'min'   => (int) round((float) ($daily['temperature_2m_min'][$i] ?? 0)),
-                'rain'  => (int) ($daily['precipitation_probability_max'][$i] ?? 0),
-            ];
-        }
-        $aqi = isset($d['air']['us_aqi']) ? (int) $d['air']['us_aqi'] : null;
-        return [
-            'name'     => (string) $d['location']['name'],
-            'country'  => (string) $d['location']['country'],
-            'emoji'    => self::codeEmoji($code, $isDay),
-            'text'     => self::codeText($code),
-            'day'      => $isDay,
-            'local'    => isset($cur['time']) ? substr((string) $cur['time'], 11, 5) : date('H:i'),
-            'temp'     => (int) round((float) ($cur['temperature_2m'] ?? 0)),
-            'feels'    => (int) round((float) ($cur['apparent_temperature'] ?? 0)),
-            'humidity' => (int) ($cur['relative_humidity_2m'] ?? 0),
-            'cloud'    => (int) ($cur['cloud_cover'] ?? 0),
-            'wind'     => (int) round((float) ($cur['wind_speed_10m'] ?? 0)),
-            'windDir'  => self::windDir((float) ($cur['wind_direction_10m'] ?? 0)),
-            'pressure' => (int) round((float) ($cur['surface_pressure'] ?? 0)),
-            'sunrise'  => !empty($daily['sunrise'][0]) ? substr((string) $daily['sunrise'][0], 11, 5) : '',
-            'sunset'   => !empty($daily['sunset'][0]) ? substr((string) $daily['sunset'][0], 11, 5) : '',
-            'aqi'      => $aqi !== null ? ['v' => $aqi, 'label' => self::aqi($aqi)] : null,
-            'days'     => $days,
-        ];
-    }
-
     public static function format(array $d): string
     {
         $w     = $d['raw'];

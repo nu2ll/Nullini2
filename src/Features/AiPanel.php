@@ -2,7 +2,7 @@
 
 final class AiPanel
 {
-    private const COLS     = ['gemini' => 2];
+    private const COLS     = ['gemini' => 1];
     private const PER_PAGE = ['gemini' => 12];
 
     public static function providers(): array
@@ -94,10 +94,10 @@ final class AiPanel
             $l[] = bidi(h($model['name'])) . ': <b>' . ($raw === 'auto' ? 'همون تنظیم کلی' : AI::THINK_LEVELS[$raw]) . '</b>';
             $l[] = 'این سطح فقط وقتی اعمال می‌شه که همین مدل رو ثابت انتخاب کرده باشی.';
         } elseif ($list) {
-            $l[] = '📌 سطح هر مدل جدا' . "\n" . 'وقتی یه مدل رو ثابت انتخاب کنی (نه خودکار)، سطح خودش اعمال می‌شه؛ برای بقیه‌ی حالت‌ها تنظیم کلی.';
+            $l[] = '📌 سطح هر مدل جدا' . "\n" . 'وقتی یه مدل رو ثابت انتخاب کنی (نه خودکار)،' . "\n" . 'سطح خودش اعمال می‌شه؛ برای بقیه‌ی حالت‌ها تنظیم کلی.';
         } else {
             $l[] = (self::providers()[$prov] ?? $prov) . ': <b>' . AI::THINK_LEVELS[AI::thinkLevel($prov)] . '</b>';
-            $l[] = '⚡ روی حالت خودکار، این سطح روی همه‌ی مدل‌ها اعمال می‌شه.' . "\n" . 'هرچی بالاتر، دقیق‌تر ولی کندتر.' . "\n" . 'پیش‌فرض: همون تنظیم قبلیِ ربات.';
+            $l[] = '⚡ روی حالت خودکار،' . "\n" . 'این سطح روی همه‌ی مدل‌ها اعمال می‌شه.' . "\n" . 'هرچی بالاتر، دقیق‌تر ولی کندتر.' . "\n" . 'پیش‌فرض: همون تنظیم قبلیِ ربات.';
         }
         return implode("\n\n", $l);
     }
@@ -121,22 +121,14 @@ final class AiPanel
             return ikb($rows);
         }
         $cur = $model !== null ? AI::modelThinkLevel($prov, $model['id']) : AI::thinkLevel($prov);
-        $row = [];
+        if ($model === null) {
+            $rows[] = [btn('📌 هر مدل جدا ▸', "ai:thm:{$prov}", 'primary')];
+        }
         foreach (AI::THINK_LEVELS as $k => $label) {
             $on    = $k === $cur;
             $label = ($model !== null && $k === 'auto') ? 'تنظیم کلی' : $label;
             $data  = $model !== null ? "ai:thv:{$prov}:" . substr(md5($model['route']), 0, 8) . ":{$k}" : "ai:ths:{$prov}:{$k}";
-            $row[] = btn(($on ? '✅ ' : '') . $label, $data, $on ? 'success' : 'primary');
-            if (count($row) === 2) {
-                $rows[] = $row;
-                $row    = [];
-            }
-        }
-        if ($row) {
-            $rows[] = $row;
-        }
-        if ($model === null) {
-            $rows[] = [btn('📌 هر مدل جدا ▸', "ai:thm:{$prov}", 'primary')];
+            $rows[] = [btn(($on ? '✅ ' : '') . $label, $data, $on ? 'success' : 'primary')];
         }
         $rows[] = [btn('🔙 برگشت', $model !== null ? "ai:thm:{$prov}" : 'ai:th', null)];
         return ikb($rows);

@@ -6,7 +6,6 @@ final class FreeAI
         'groq'       => ['name' => 'Groq', 'url' => 'https://api.groq.com/openai/v1'],
     ];
 
-    // لیست ثابت مدل‌ها (دیگه از API گرفته نمی‌شه). برای کم/زیاد کردن فقط همین لیست رو عوض کن.
     private const MODELS = [
         'groq' => [
             'openai/gpt-oss-120b',

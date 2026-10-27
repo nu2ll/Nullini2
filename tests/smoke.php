@@ -67,11 +67,6 @@ check('snapshot has users', (int) (new PDO('sqlite:' . $copy))->query('SELECT CO
 file_put_contents($copy, 'not a database');
 check('broken file detected', Backup::verify($copy), false);
 @unlink($copy);
-Backup::markPushed(Backup::fingerprint());
-check('clean after push', Backup::isDirty(), false);
-Store::set('t', 'dirty', 1);
-check('dirty after write', Backup::isDirty(), true);
-check('no-op write stays clean', (function () { Backup::markPushed(Backup::fingerprint()); Db::run('DELETE FROM kv WHERE ns = ?', ['nothing']); return Backup::isDirty(); })(), false);
 @unlink(NULLINI_DATA . '/.last_push');
 @unlink(Db::changeMarker());
 
@@ -281,17 +276,6 @@ check('dl clock', Downloader::clock(3725), '1:02:05');
 check('dl explain bot', str_contains(Downloader::explain("ERROR: Sign in to confirm you're not a bot"), 'ربات'), true);
 check('dl explain size', str_contains(Downloader::explain('File is larger than max-filesize'), Downloader::limitText()), true);
 
-$wx = Weather::toArray([
-    'location' => ['name' => 'تهران', 'country' => 'ایران'],
-    'raw'      => ['current' => ['temperature_2m' => 21.6, 'apparent_temperature' => 20, 'weather_code' => 0, 'is_day' => 1, 'time' => '2026-10-20T12:30'],
-                   'daily' => ['time' => ['a', 'b'], 'temperature_2m_max' => [25, 24], 'temperature_2m_min' => [12, 11], 'weather_code' => [0, 3]]],
-    'air'      => ['us_aqi' => 42],
-]);
-check('wx temp', $wx['temp'], 22);
-check('wx days', count($wx['days']), 2);
-check('wx aqi', $wx['aqi']['v'], 42);
-check('wx local', $wx['local'], '12:30');
-
 check('gw guide', str_contains(Ui::guide('giveaway'), 'قرعه‌کشی'), true);
 Db::run('INSERT INTO gw_entries (gid, uid, name, at) VALUES (?, ?, ?, ?) ON CONFLICT (gid, uid) DO NOTHING', ['abc', 1, 'a', time()]);
 $dup = Db::run('INSERT INTO gw_entries (gid, uid, name, at) VALUES (?, ?, ?, ?) ON CONFLICT (gid, uid) DO NOTHING', ['abc', 1, 'a', time()])->rowCount();
@@ -334,9 +318,6 @@ check('slot bars', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '🎰
 check('basketball name', Assistant::dataInfo(['dice' => ['emoji' => '🏀', 'value' => 5]])[0], 'بسکتبال');
 check('football goal rule', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '⚽', 'value' => 3]])[1], 'عدد ۳ و ۴ و ۵ یعنی گل شد'), true);
 
-// ───────── پوشش بقیه‌ی سورس: سوییچ‌ها، هلپرها، بن، ابزارها، بازی‌ها ─────────
-
-// Switches
 $resetSwitches = static function (): void {
     $r = new ReflectionProperty(Switches::class, 'off');
     if (PHP_VERSION_ID < 80100) {
@@ -373,7 +354,6 @@ Switches::toggle('chess');
 $kbOff = array_values(array_filter(array_merge(...Switches::keyboard()['inline_keyboard']), static fn($b) => $b['callback_data'] === 'tl:t:chess'));
 check('switch keyboard shows off', str_starts_with($kbOff[0]['text'], '⛔'), true);
 Switches::toggle('chess');
-// سوییچ قدیمی «games» → هر پنج بازی خاموش
 Store::set('cfg', 'tools_off', ['games', 'qr']);
 $resetSwitches();
 check('legacy games chess', Switches::on('chess'), false);
@@ -389,15 +369,12 @@ Switches::toggle('qr');
 $resetSwitches();
 check('switch persists across reload', Switches::on('qr'), false);
 Switches::setAll(true);
-// هر دستور منو باید به یه سوییچ واقعی وصل باشه
 foreach (Switches::COMMAND_SWITCH as $cmd => $sw) {
     check("command switch {$cmd}", isset(Switches::TOOLS[$sw]), true);
 }
-// کلیدهای Intent باید همه سوییچ داشته باشن (وگرنه خاموش‌شدن اثر نمی‌کنه)
 foreach (Intent::NAMES as $n) {
     check("intent switch {$n}", isset(Switches::TOOLS[$n]), true);
 }
-// هر بازیِ هندلر دکمه‌ها باید سوییچ خودش رو داشته باشه
 foreach (array_keys((new ReflectionClass('CallbackHandler'))->getConstant('GAMES')) as $g) {
     check("callback game switch {$g}", isset(Switches::TOOLS[$g]), true);
 }
@@ -415,7 +392,6 @@ foreach (['tr' => 'translate', 'ft' => 'font', 'gw' => 'giveaway', 'wk' => 'wiki
     check("commands show {$cmd}", in_array($cmd, array_column(Ui::commands('admin'), 'command'), true), true);
 }
 
-// helpers
 check('h escapes', h("<a href='x'>&"), '&lt;a href=&#039;x&#039;&gt;&amp;');
 check('h null', h(null), '');
 check('fa digits', fa('2026/10/27'), '۲۰۲۶/۱۰/۲۷');
@@ -439,10 +415,8 @@ check('envList split', envList('NULLINI_TEST_LIST'), ['a', 'b', 'c', 'd']);
 check('envList default', envList('NULLINI_NO_SUCH_LIST', ['x']), ['x']);
 putenv('NULLINI_TEST_LIST');
 
-// پک‌های ایموجی پرمیوم (فقط بات دوم ازشون استفاده می‌کنه)
 check('premium packs', App::cfg('premium_packs'), ['RestrictedEmoji', 'NewsEmoji']);
 
-// Ban
 check('ban admin config', is_array(App::cfg('admins', [])), true);
 $uid = 987654321;
 check('ban initially not', Ban::is($uid), false);
@@ -465,7 +439,6 @@ check('ban sender guest caller', Ban::senderId(['guest_message' => ['guest_bot_c
 check('ban sender guest from', Ban::senderId(['guest_message' => ['from' => ['id' => 16]]]), 16);
 check('ban sender unknown', Ban::senderId(['poll' => []]), 0);
 
-// Tools
 check('nid valid sample', Tools::isValidNid('0499370899'), true);
 check('nid bad check digit', Tools::isValidNid('0499370898'), false);
 check('nid all same', Tools::isValidNid('1111111111'), false);
@@ -491,7 +464,6 @@ check('password clamp', [strlen(Tools::password(1)), strlen(Tools::password(500)
 check('password differs', Tools::password(16) !== Tools::password(16), true);
 check('date text nonempty', Tools::dateText() !== '', true);
 
-// Wiki / UserInfo
 check('wiki lang fa', Wiki::lang('سلام'), 'fa');
 check('wiki lang en', Wiki::lang('hello'), 'en');
 check('age tiny', UserInfo::ageText(time() - 5), 'کمتر از یک ماه');
@@ -500,7 +472,6 @@ check('age one year', UserInfo::ageText(time() - 370 * 86400), '۱ سال');
 check('age year and month', UserInfo::ageText(time() - 400 * 86400), '۱ سال و ۱ ماه');
 check('dc bad fileid', UserInfo::dcFromFileId('***'), null);
 
-// بازی‌ها
 check('ttt row win', TicTacToe::winner(['X', 'X', 'X', '', '', '', '', '', '']), 'X');
 check('ttt col win', TicTacToe::winner(['O', '', '', 'O', 'X', '', 'O', '', 'X']), 'O');
 check('ttt diag win', TicTacToe::winner(['X', 'O', '', 'O', 'X', '', '', '', 'X']), 'X');

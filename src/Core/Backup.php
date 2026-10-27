@@ -177,19 +177,9 @@ final class Backup
         @file_put_contents(self::stateFile(), $fingerprint);
     }
 
-    public static function lastPushed(): string
-    {
-        return (string) @file_get_contents(self::stateFile());
-    }
-
     public static function lastPushAt(): int
     {
         return is_file(self::stateFile()) ? (int) filemtime(self::stateFile()) : 0;
-    }
-
-    public static function isDirty(): bool
-    {
-        return self::fingerprint() !== self::lastPushed();
     }
 
     public static function verify(string $file): bool

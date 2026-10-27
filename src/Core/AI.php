@@ -12,7 +12,6 @@ final class AI
 
     public const SERVICE_IDS = [777000, 1087968824, 136817688];
 
-    /** منابع سرچِ آخرین جواب: [['t' => عنوان, 'u' => لینک], ...] */
     public static array $sources = [];
 
     public const FAIL_TEXT = '😕 الان مغزم هنگ کرده، یه‌کم دیگه دوباره بپرس.';
@@ -107,13 +106,11 @@ final class AI
         return null;
     }
 
-    /** آخرین نتیجه‌ی هر کلید (برای /quota) */
     public static function noteKey(string $prov, string $key, int $code): void
     {
         Store::set('ai', 'keystat_' . $prov . '_' . substr(md5($key), 0, 10), ['code' => $code, 'at' => time()]);
     }
 
-    /** پیام‌های جوابِ هوش مصنوعی رو علامت می‌زنه تا ریپلای روی پیام ابزارها (دانلودر، تاس، هوا، روست...) به AI نره */
     public static function markMsg($chatId, $messageId): void
     {
         if ((int) $messageId > 0) {
@@ -358,7 +355,6 @@ final class AI
                     $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => self::thinkingFor($model, ($opt['section'] ?? '') === 'chat' ? self::geminiThinking($model) : (string) $thinking)];
                 }
                 if ($tav) {
-                    // سرچ Tavily به‌صورت ابزار؛ مدل خودش تصمیم می‌گیره صداش کنه یا نه
                     $payload['tools'] = [['functionDeclarations' => [WebSearch::declaration()]]];
                     if ($rounds >= WebSearch::MAX_ROUNDS) {
                         $payload['toolConfig'] = ['functionCallingConfig' => ['mode' => 'NONE']];
@@ -488,13 +484,8 @@ final class AI
         return ['code' => $r['code'], 'data' => is_array($data) ? $data : null, 'raw' => $r['raw'] !== '' ? $r['raw'] : $r['error']];
     }
 
-    /** مدل‌های ویس Gemini (به ترتیب تلاش) */
     private const TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
 
-    /**
-     * متن → ویس با Gemini-TTS. مسیر فایل OGG/Opus رو برمی‌گردونه (برای sendVoice) یا null.
-     * فایل رو بعد از ارسال خودت پاک کن.
-     */
     public static function speak(string $text, ?float $deadline = null, string $ext = 'ogg'): ?string
     {
         $keys = self::keys();
@@ -537,14 +528,13 @@ final class AI
                 if ($r['code'] === 429) {
                     self::cool($key, $model, time() + 120, 'محدودیت ویس');
                 } elseif ($r['code'] === 400 || $r['code'] === 404) {
-                    continue 2; // این مدل برای این کلید/زبان جواب نمی‌ده؛ مدل بعدی
+                    continue 2;
                 }
             }
         }
         return null;
     }
 
-    /** PCM خام (16bit mono 24kHz) → فایل OGG/Opus یا MP3 */
     private static function pcmToAudio(string $pcm, string $ext = 'ogg'): ?string
     {
         if ($pcm === '') {
@@ -565,7 +555,6 @@ final class AI
         return $out;
     }
 
-    /** لیست منابع آخر جواب به‌شکل لینک مارک‌داون (toHtml تبدیلش می‌کنه) */
     private static function sourcesBlock(): string
     {
         $seenU = [];
@@ -577,9 +566,9 @@ final class AI
                 continue;
             }
             $host  = (string) (parse_url($url, PHP_URL_HOST) ?: $url);
-            $title = $host; // آدرس سایت دقیقاً همون‌طور که هست (www داشت می‌مونه، نداشت اضافه نمی‌شه)
+            $title = $host;
             $row   = '[' . $title . '](' . str_replace([')', ' '], ['%29', '%20'], $url) . ')';
-            if (count($rows) >= 3 || $len + mb_strlen($title) > 1200) { // حداکثر ۳ منبع؛ جا برای خود جواب بمونه
+            if (count($rows) >= 3 || $len + mb_strlen($title) > 1200) {
                 break;
             }
             $seenU[$url] = true;
@@ -648,7 +637,6 @@ final class AI
             . self::keyReport('gemini', 'Gemini', self::keys(), $all) . "\n" . self::keyReport('groq', 'Groq', FreeAI::keys('groq'), []);
     }
 
-    /** وضعیت هر کلید: آخرین نتیجه + تعداد مدل‌های در استراحت (فقط جمنی) */
     private static function keyReport(string $prov, string $name, array $keys, array $models): string
     {
         if (!$keys) {
@@ -785,12 +773,11 @@ final class AI
             $closed = (bool) preg_match('/\]\]/u', $im[1]);
             $prompt = preg_replace('/\]\].*$/su', '', $im[1]) ?? $im[1];
             $out['image'] = mb_substr(mbTrim($prompt, " \t\n\"'«»[]"), 0, 4096);
-            // استریم وسط تگ قطع شده (مثل «[[image | A hyper-real») → پرامپت ناقصه
             $out['image_partial'] = !$closed && mb_strlen($out['image']) < 40;
             return $out;
         }
         if (preg_match('/^\s*\[\[\s*(image|reaction)\b/iu', $text)) {
-            return $out; // تگ خام هیچ‌وقت به‌عنوان جواب نمایش داده نشه
+            return $out;
         }
 
         if (!in_array($ctx['chat_type'] ?? '', ['inline', 'miniapp'], true) && empty($ctx['no_action']) && ($act = Intent::parse($text)) !== null) {
@@ -864,7 +851,6 @@ final class AI
         return null;
     }
 
-    /** خط فقط ایموجی (مثل «😘») بدون هیچ حرف و عددی؟ */
     public static function isEmojiLine(string $line): bool
     {
         $line = trim($line);
@@ -873,10 +859,6 @@ final class AI
             && preg_match('/[\p{So}]/u', $line) === 1;
     }
 
-    /**
-     * $bare = true: بعضی مدل‌ها به‌جای «[[reaction | 😘]]» فقط یه ایموجی تو خط اول می‌نویسن
-     * و بعدش جواب رو؛ اون ایموجی هم به‌عنوان ری‌اکشن حساب می‌شه (فقط وقتی بعدش متنی باشه).
-     */
     public static function splitReaction(string $text, bool $bare = false): array
     {
         $text  = ltrim($text);
