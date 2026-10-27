@@ -200,8 +200,8 @@ final class AI
 
         $chain = $only !== null ? [$only] : self::models($opt['tier'] ?? 'smart');
         foreach ($chain as $model) {
-            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : 'minimal';
-            $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma');
+            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : null;
+            $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma') ? 2 : 0;
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];
                 if (self::isCooling($key, $model)) {
@@ -221,12 +221,12 @@ final class AI
                 if ($thinking && !$gemma) {
                     $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking];
                 }
-                if ($tools) {
-                    $payload['tools'] = [['google_search' => new stdClass()], ['url_context' => new stdClass()]];
+                if ($tools > 0) {
+                    $payload['tools'] = $tools > 1 ? [['google_search' => new stdClass()], ['url_context' => new stdClass()]] : [['google_search' => new stdClass()]];
                 }
                 $r = is_callable($opt['stream'] ?? null)
                     ? self::geminiStream($model, $payload, $key, (int) max(5, min($left, 55)), $opt['stream'])
-                    : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, 10)));
+                    : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, $tools > 0 ? 20 : 10)));
 
                 if ($r['code'] === 200 && $r['data'] !== null) {
                     $text = self::extractText($r['data']);
@@ -242,8 +242,8 @@ final class AI
                 logWarn('ai', "{$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $raw), 0, 160));
 
                 switch (true) {
-                    case $tools && ($r['code'] === 429 || ($r['code'] === 400 && preg_match('/tool|search|ground|url_context/i', $raw) === 1)):
-                        $tools = false;
+                    case $tools > 0 && ($r['code'] === 429 || ($r['code'] === 400 && preg_match('/tool|search|ground|url_context/i', $raw) === 1)):
+                        $tools = $r['code'] === 429 ? 0 : $tools - 1;
                         $i--;
                         break;
                     case $r['code'] === 429:
