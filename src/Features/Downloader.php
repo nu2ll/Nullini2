@@ -265,6 +265,8 @@ final class Downloader
             $link['url'] = $hit;
         }
 
+        $link['url'] = self::cleanUrl($link['url'], $link['site']);
+
         $photos = static fn(int $expect = 0) => $sp === null && Photos::supports($link['site'])
             && ($msg !== null ? Photos::deliver($msg, $link, (int) $t['card'], $expect) : Photos::inline($link, (string) $t['imid'], $t['chat'], $uid));
 
@@ -745,6 +747,14 @@ final class Downloader
         return $out;
     }
 
+    public static function cleanUrl(string $url, string $site): string
+    {
+        if ($site !== 'instagram') {
+            return $url;
+        }
+        return rtrim(preg_replace('/([?&])img_index=\d+&?/', '$1', $url) ?? $url, '?&');
+    }
+
     private static function workAlbum(array $job, string $token, string $dir): void
     {
         $tg    = App::tg();
@@ -753,20 +763,27 @@ final class Downloader
         $limit = self::limit($job);
         $last  = 0.0;
         self::show($job, self::stageText($job, '⏳ دارم ' . fa((string) $total) . ' تا فایل رو می‌گیرم...'));
-        $res = self::run(array_merge([self::bin()], self::commonArgs(), [
-            '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<44M]+ba[filesize<5M]/b[filesize<49M]/bv*+ba/b', '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
-            '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
-            '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
-            '--max-filesize', (int) ($limit / 1048576) - 1 . 'M',
-            '-o', $dir . '/%(playlist_index)02d_%(id).30s.%(ext)s',
-            $job['url'],
-        ]), self::jobTime() - 60, static function (string $line) use ($job, $total, &$last): void {
-            if (preg_match('/Downloading item (\d+) of (\d+)/', $line, $m) && microtime(true) - $last >= 2.5) {
-                $n = min((int) $m[2], self::ALBUM_MAX);
-                self::show($job, self::stageText($job, '📦 فایل ' . fa($m[1]) . ' از ' . fa((string) $n) . "\n" . self::bar((int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . ' ' . fa((string) (int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . '٪'));
-                $last = microtime(true);
-            }
-        });
+        $url = self::cleanUrl((string) $job['url'], (string) $job['site']);
+        $res = $job['site'] === 'instagram' ? GalleryDl::download($url, $dir, self::jobTime() - 60, $limit) : ['code' => 1, 'out' => '', 'err' => ''];
+        if ($job['site'] === 'instagram') {
+            logInfo('dl', 'instagram album via gallery-dl: files=' . count(self::albumFiles($dir)));
+        }
+        if (self::albumFiles($dir) === []) {
+            $res = self::run(array_merge([self::bin()], self::commonArgs(), [
+                '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<44M]+ba[filesize<5M]/b[filesize<49M]/bv*+ba/b', '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
+                '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
+                '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
+                '--max-filesize', (int) ($limit / 1048576) - 1 . 'M',
+                '-o', $dir . '/%(playlist_index)02d_%(id).30s.%(ext)s',
+                $url,
+            ]), self::jobTime() - 60, static function (string $line) use ($job, $total, &$last): void {
+                if (preg_match('/Downloading item (\d+) of (\d+)/', $line, $m) && microtime(true) - $last >= 2.5) {
+                    $n = min((int) $m[2], self::ALBUM_MAX);
+                    self::show($job, self::stageText($job, '📦 فایل ' . fa($m[1]) . ' از ' . fa((string) $n) . "\n" . self::bar((int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . ' ' . fa((string) (int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . '٪'));
+                    $last = microtime(true);
+                }
+            });
+        }
 
         $items   = [];
         $big     = [];

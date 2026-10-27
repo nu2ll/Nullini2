@@ -86,6 +86,31 @@ final class GalleryDl
         return mb_substr((string) end($lines), 0, 300);
     }
 
+    public static function download(string $url, string $dir, int $timeout, int $limit): array
+    {
+        $bin = self::bin();
+        if ($bin === null) {
+            logWarn('dl', 'gallery-dl not found, album download disabled');
+            return ['code' => -1, 'out' => '', 'err' => 'gallery-dl not found'];
+        }
+        $args = [$bin, '--config-ignore', '-D', $dir, '-f', '{num:>02}_{filename}.{extension}', '--range', '1-' . self::MAX, '--filesize-max', max(1, (int) ($limit / 1048576) - 1) . 'M', '-o', 'timeout=20'];
+        if (($jar = Downloader::cookiesFile()) !== null) {
+            $args[] = '--cookies';
+            $args[] = $jar;
+        }
+        $proxy = (string) env('DL_PROXY', '');
+        if ($proxy !== '') {
+            $args[] = '--proxy';
+            $args[] = $proxy;
+        }
+        $args[] = $url;
+        $res = Downloader::exec($args, $timeout);
+        if ($res['code'] !== 0) {
+            logWarn('dl', 'gallery-dl album ' . (string) parse_url($url, PHP_URL_HOST) . " exit {$res['code']}: " . self::lastLine($res['err']));
+        }
+        return $res;
+    }
+
     private static function pinMeta(array $row): ?array
     {
         $meta = ($row[0] ?? null) === 2 ? ($row[1] ?? null) : (($row[0] ?? null) === 3 ? ($row[2] ?? null) : null);

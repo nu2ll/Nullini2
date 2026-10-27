@@ -294,6 +294,10 @@ $ps = (string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [
 check('pin slots', GalleryDl::pinSlots($ps), [['https://v1.pinimg.com/1.mp4', 'https://i.pinimg.com/originals/a/1.jpg'], ['https://i.pinimg.com/originals/b/2.jpg']]);
 check('pin slots long video', GalleryDl::pinSlots((string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg', 'videos' => ['video_list' => ['V_720P' => ['url' => 'https://v1.pinimg.com/1.mp4', 'duration' => 120000]]]]]]]]])), []);
 check('pin slots images only', GalleryDl::pinSlots((string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg']]]]]])), []);
+check('ig strip img_index only', Downloader::cleanUrl('https://www.instagram.com/p/AbC/?img_index=2', 'instagram'), 'https://www.instagram.com/p/AbC/');
+check('ig strip img_index keep igsh', Downloader::cleanUrl('https://www.instagram.com/p/AbC/?igsh=x&img_index=3', 'instagram'), 'https://www.instagram.com/p/AbC/?igsh=x');
+check('ig strip img_index first', Downloader::cleanUrl('https://www.instagram.com/p/AbC/?img_index=1&igsh=x', 'instagram'), 'https://www.instagram.com/p/AbC/?igsh=x');
+check('other site untouched', Downloader::cleanUrl('https://x.com/a?img_index=2', 'twitter'), 'https://x.com/a?img_index=2');
 check('gdl supports', [GalleryDl::supports('instagram'), GalleryDl::supports('pinterest'), GalleryDl::supports('reddit')], [true, true, false]);
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');
