@@ -54,6 +54,9 @@ final class GalleryDl
         $res  = Downloader::exec($args, 45);
         $sets = self::parse($res['out']);
         logInfo('photo', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ': exit=' . $res['code'] . ' sets=' . count($sets));
+        if ($sets !== [] && str_contains((string) parse_url($url, PHP_URL_HOST), 'pinterest')) {
+            logInfo('photo', 'pin meta: ' . self::metaLog($res['out']));
+        }
         if ($sets === [] && $depth < 2 && ($next = self::queued($res['out'])) !== null && $next !== $url) {
             logInfo('photo', 'gallery-dl queued -> ' . (string) parse_url($next, PHP_URL_HOST));
             return self::images($next, $depth + 1);
@@ -82,6 +85,44 @@ final class GalleryDl
             $out[] = $label;
         }
         return $out === [] ? 'unparsed:' . substr((string) preg_replace('/\\s+/', ' ', $json), 0, 200) : implode(' ', $out);
+    }
+
+    private static function findGif(array $meta, int $depth = 0): ?string
+    {
+        foreach ($meta as $v) {
+            if (is_string($v) && preg_match('#^https?://\S+\.gif(\?\S*)?$#i', $v)) {
+                return $v;
+            }
+            if (is_array($v) && $depth < 4 && ($f = self::findGif($v, $depth + 1)) !== null) {
+                return $f;
+            }
+        }
+        return null;
+    }
+
+    private static function leaves(array $meta, string $path, array &$out, int $depth = 0): void
+    {
+        foreach ($meta as $k => $v) {
+            $p = $path === '' ? (string) $k : $path . '.' . $k;
+            if (is_string($v) && preg_match('#\.(gif|mp4|m3u8|webp|jpg|png)(\?|$)#i', $v)) {
+                $out[] = $p . '=' . substr($v, -32);
+            } elseif (is_array($v) && $depth < 4) {
+                self::leaves($v, $p, $out, $depth + 1);
+            }
+        }
+    }
+
+    private static function metaLog(string $json): string
+    {
+        $data = json_decode(trim($json), true);
+        $out  = [];
+        foreach (is_array($data) ? $data : [] as $row) {
+            if (is_array($row) && ($row[0] ?? null) === 3 && is_array($row[2] ?? null)) {
+                self::leaves($row[2], '', $out);
+                break;
+            }
+        }
+        return substr(implode(' ; ', array_slice($out, 0, 12)), 0, 700);
     }
 
     public static function queued(string $json): ?string
@@ -115,6 +156,7 @@ final class GalleryDl
             return [];
         }
         $urls = [];
+        $alts = [];
         foreach ($data as $row) {
             if (!is_array($row) || ($row[0] ?? null) !== 3) {
                 continue;
@@ -127,8 +169,11 @@ final class GalleryDl
             }
             if (in_array($ext, self::IMAGE, true) && preg_match('#^https?://#', $url)) {
                 $urls[] = $url;
+                if ($ext !== 'gif' && ($gif = self::findGif($meta)) !== null) {
+                    $alts[$url] = $gif;
+                }
             }
         }
-        return array_map(static fn(string $u): array => [$u], array_slice(Scrape::unique($urls), 0, self::MAX));
+        return array_map(static fn(string $u): array => isset($alts[$u]) ? [$alts[$u], $u] : [$u], array_slice(Scrape::unique($urls), 0, self::MAX));
     }
 }
