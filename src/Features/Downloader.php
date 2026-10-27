@@ -271,7 +271,7 @@ final class Downloader
         }
         $info  = $p['info'];
         $count = (int) ($info['count'] ?? 1);
-        if ($multi && $count > 1 && (in_array('v', (array) ($info['kinds'] ?? []), true) || !Photos::supports($link['site']))) {
+        if ($multi && $count > 1) {
             $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
             self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));
             return;
