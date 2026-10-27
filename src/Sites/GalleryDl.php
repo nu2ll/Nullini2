@@ -59,9 +59,29 @@ final class GalleryDl
             return self::images($next, $depth + 1);
         }
         if ($sets === []) {
-            logWarn('photo', 'gallery-dl empty: out=' . substr((string) preg_replace('/\\s+/', ' ', $res['out']), 0, 300) . ' err=' . substr(trim($res['err']), -300));
+            logWarn('photo', 'gallery-dl empty: rows=' . self::summary($res['out']) . ' err=' . substr(trim($res['err']), -300));
         }
         return $sets;
+    }
+
+    private static function summary(string $json): string
+    {
+        $data = json_decode(trim($json), true);
+        $out  = [];
+        foreach (is_array($data) ? $data : [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $meta  = is_array($row[2] ?? null) ? $row[2] : [];
+            $label = 't' . (string) ($row[0] ?? '?');
+            if (($row[0] ?? null) === 3) {
+                $label .= ':' . (string) ($meta['extension'] ?? pathinfo((string) parse_url((string) ($row[1] ?? ''), PHP_URL_PATH), PATHINFO_EXTENSION));
+            } elseif (($row[0] ?? null) === -1) {
+                $label .= ':' . substr((string) ($row[1]['message'] ?? ''), 0, 80);
+            }
+            $out[] = $label;
+        }
+        return $out === [] ? 'unparsed:' . substr((string) preg_replace('/\\s+/', ' ', $json), 0, 200) : implode(' ', $out);
     }
 
     public static function queued(string $json): ?string

@@ -98,11 +98,19 @@ final class Photos
     {
         return match ($site) {
             'instagram' => GalleryDl::images($url),
-            'pinterest' => GalleryDl::images($url),
+            'pinterest' => self::pinGif(GalleryDl::images($url)),
             'twitter'   => self::twitter($url),
             'reddit'    => self::reddit($url),
             default     => [],
         };
+    }
+
+    private static function pinGif(array $sets): array
+    {
+        return array_map(static function (array $c): array {
+            $u = (string) ($c[0] ?? '');
+            return preg_match('#^https://i\.pinimg\.com/originals/.+\.jpg$#', $u) ? array_merge([substr($u, 0, -3) . 'gif'], $c) : $c;
+        }, $sets);
     }
 
     private static function twitter(string $url): array
