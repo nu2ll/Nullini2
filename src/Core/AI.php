@@ -262,11 +262,17 @@ final class AI
         foreach ($chain as $model) {
             $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : null;
             $search   = !empty($opt['search']) && self::searchOn() && !str_starts_with($model, 'gemma');
+            $noSearch = [];
+            $extra    = [];
+            $rounds   = 0;
+            $tav      = $search && WebSearch::available();
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];
                 if (self::isCooling($key, $model)) {
                     continue;
                 }
+                // سهمیه‌ی سرچ گوگل جدا از سهمیه‌ی چت حساب می‌شه؛ اگه واسه این کلید تموم شده بود، بدون سرچ جواب بده
+                $useSearch = $search && !$tav && !isset($noSearch[$key]) && !self::isCooling($key, $model . '#search');
                 $left = $deadline - microtime(true);
                 if ($left < 2) {
                     return null;
@@ -278,10 +284,19 @@ final class AI
                     unset($payload['systemInstruction']);
                     $payload['contents'] = self::inlineSystem($contents, $system);
                 }
+                if ($extra) {
+                    $payload['contents'] = array_merge($payload['contents'], $extra);
+                }
                 if ($thinking && !$gemma) {
                     $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking];
                 }
-                if ($search) {
+                if ($tav) {
+                    // سرچ Tavily به‌صورت ابزار؛ مدل خودش تصمیم می‌گیره صداش کنه یا نه
+                    $payload['tools'] = [['functionDeclarations' => [WebSearch::declaration()]]];
+                    if ($rounds >= WebSearch::MAX_ROUNDS) {
+                        $payload['toolConfig'] = ['functionCallingConfig' => ['mode' => 'NONE']];
+                    }
+                } elseif ($useSearch) {
                     // خود مدل تصمیم می‌گیره سرچ لازمه یا نه؛ مدل و لحن عوض نمی‌شه
                     $payload['tools'] = [['google_search' => (object) []]];
                 }
@@ -291,8 +306,30 @@ final class AI
 
                 self::noteKey('gemini', $key, (int) $r['code']);
                 if ($r['code'] === 200 && $r['data'] !== null) {
+                    if ($tav && $rounds < WebSearch::MAX_ROUNDS) {
+                        $mparts = (array) ($r['data']['candidates'][0]['content']['parts'] ?? []);
+                        $calls  = array_values(array_filter($mparts, static fn($p) => is_array($p) && isset($p['functionCall'])));
+                        if ($calls) {
+                            $rounds++;
+                            $extra[] = ['role' => 'model', 'parts' => array_values(array_filter($mparts, static fn($p) => is_array($p) && empty($p['thought'])))];
+                            $resp    = [];
+                            foreach ($calls as $ci => $c) {
+                                $q      = (string) ($c['functionCall']['args']['query'] ?? '');
+                                $resp[] = ['functionResponse' => [
+                                    'name'     => (string) ($c['functionCall']['name'] ?? 'web_search'),
+                                    'response' => ['result' => $ci < 2 ? WebSearch::run($q, $deadline) : 'Skipped: too many searches at once.'],
+                                ]];
+                            }
+                            $extra[] = ['role' => 'user', 'parts' => $resp];
+                            $i--;
+                            continue;
+                        }
+                    }
                     $text = self::extractText($r['data']);
                     if ($text !== null) {
+                        if ($search && isset($noSearch[$key])) {
+                            self::cool($key, $model . '#search', time() + 3600, 'سهمیه‌ی سرچ تموم شده');
+                        }
                         Users::hit('model:' . $model);
                         return $text;
                     }
@@ -304,6 +341,11 @@ final class AI
                 logWarn('ai', "{$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $raw), 0, 160) . ($r['code'] === 429 ? ' | ' . preg_replace('/\s+/', ' ', mb_substr($raw, 0, 600)) : ''));
 
                 switch (true) {
+                    case $r['code'] === 429 && $useSearch:
+                        // شاید فقط سهمیه‌ی سرچ تموم شده؛ همین کلید رو یه بار بدون سرچ امتحان کن
+                        $noSearch[$key] = true;
+                        $i--;
+                        break;
                     case $r['code'] === 429:
                         if (preg_match('/per ?day|PerDay|daily/i', $raw)) {
                             self::cool($key, $model, self::quotaResetAt(), 'سهمیه‌ی روزانه تموم شد');
@@ -312,11 +354,17 @@ final class AI
                             self::cool($key, $model, time() + max(10, min($wait, 600)), 'محدودیت دقیقه‌ای');
                         }
                         break;
+                    case $r['code'] === 400 && $tav && preg_match('/tool|function|declaration/i', $raw) === 1:
+                        $tav    = false;
+                        $extra  = [];
+                        $rounds = 0;
+                        $i--;
+                        break;
                     case $r['code'] === 400 && $thinking && stripos($raw, 'think') !== false:
                         $thinking = null;
                         $i--;
                         break;
-                    case $r['code'] === 400 && $search && preg_match('/tool|search|ground/i', $raw) === 1:
+                    case $r['code'] === 400 && $useSearch && preg_match('/tool|search|ground/i', $raw) === 1:
                         $search = false;
                         $i--;
                         break;
@@ -345,9 +393,10 @@ final class AI
         $text   = '';
         $buf    = '';
         $finish = null;
+        $calls  = [];
 
         $r = Http::stream(sprintf(self::STREAM_API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], $timeout,
-            static function (string $chunk) use (&$text, &$buf, &$finish, $emit): void {
+            static function (string $chunk) use (&$text, &$buf, &$finish, &$calls, $emit): void {
                 foreach (Http::sseData($buf, $chunk) as $json) {
                     $d = json_decode($json, true);
                     if (!is_array($d)) {
@@ -356,6 +405,10 @@ final class AI
                     $finish = $d['candidates'][0]['finishReason'] ?? $d['promptFeedback']['blockReason'] ?? $finish;
                     $delta  = '';
                     foreach ($d['candidates'][0]['content']['parts'] ?? [] as $p) {
+                        if (isset($p['functionCall'])) {
+                            $calls[] = $p;
+                            continue;
+                        }
                         if (empty($p['thought']) && isset($p['text'])) {
                             $delta .= $p['text'];
                         }
@@ -368,10 +421,11 @@ final class AI
             });
 
         if ($r['code'] === 200) {
-            if ($text === '' && $r['error'] !== '') {
+            if ($text === '' && !$calls && $r['error'] !== '') {
                 return ['code' => 0, 'data' => null, 'raw' => $r['error']];
             }
-            $cand = $text !== '' ? ['content' => ['parts' => [['text' => $text]]]] : ['finishReason' => $finish];
+            $parts = $text !== '' ? [['text' => $text]] : [];
+            $cand  = ($parts || $calls) ? ['content' => ['parts' => array_merge($parts, $calls)]] : ['finishReason' => $finish];
             return ['code' => 200, 'data' => ['candidates' => [$cand]], 'raw' => ''];
         }
 
