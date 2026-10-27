@@ -200,7 +200,7 @@ final class AI
 
         $chain = $only !== null ? [$only] : self::models($opt['tier'] ?? 'smart');
         foreach ($chain as $model) {
-            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : null;
+            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : (str_contains($model, 'lite') && !empty($opt['search']) ? 'medium' : null);
             $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma') ? 2 : 0;
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];

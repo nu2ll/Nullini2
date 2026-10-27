@@ -7,6 +7,7 @@ final class FreeAI
     ];
 
     private const SKIP = '/embed|whisper|tts|guard|moderat|rerank|orpheus|playai|transcri|speech|diffusion|flux|ocr|safety|reward|retriev|parakeet|canary/i';
+    private const EXTRA = ['groq' => ['groq/compound']];
     private const VISION = '/scout|maverick|vision|llava|\bvl\b|qwen3\.\d/i';
     private const SEARCH_TOOL = [
         'type'     => 'function',
@@ -49,8 +50,13 @@ final class FreeAI
         if (!isset(self::PROVIDERS[$prov])) {
             return [];
         }
-        $list = Store::remember('ai', 'models_' . $prov, 21600, static fn() => self::fetch($prov));
+        $list = Store::remember('ai', 'models_' . $prov, 60, static fn() => self::fetch($prov));
         $list = is_array($list) ? $list : [];
+        foreach (self::EXTRA[$prov] ?? [] as $id) {
+            if (!in_array($id, array_column($list, 'id'), true)) {
+                $list[] = ['id' => $id, 'name' => $id, 'vision' => null];
+            }
+        }
         if (!empty(App::cfg('ai', [])['free_only'][$prov])) {
             $only = array_map('strval', (array) (App::cfg('ai', [])['free_order'][$prov] ?? []));
             $list = array_values(array_filter($list, static fn($e) => in_array($e['id'] ?? '', $only, true)));
@@ -332,6 +338,9 @@ final class FreeAI
         }
         $orig     = $payload['messages'];
         $rounds   = 0;
+        if ($fnSearch && self::wantsSearch($messages)) {
+            $payload['tool_choice'] = 'required';
+        }
         $cap      = $prov === 'groq' ? ($search || str_contains($model, 'compound') ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
         $url      = self::PROVIDERS[$prov]['url'] . '/chat/completions';
         $n        = count($keys);
@@ -358,9 +367,7 @@ final class FreeAI
                         $args = json_decode((string) ($tc['function']['arguments'] ?? ''), true);
                         $payload['messages'][] = ['role' => 'tool', 'tool_call_id' => (string) ($tc['id'] ?? ''), 'content' => self::searchText((string) (is_array($args) ? ($args['query'] ?? '') : ''))];
                     }
-                    if ($rounds >= 2) {
-                        $payload['tool_choice'] = 'none';
-                    }
+                    $payload['tool_choice'] = $rounds >= 2 ? 'none' : 'auto';
                     $i--;
                     continue;
                 }
@@ -473,9 +480,23 @@ final class FreeAI
         return $out ?: null;
     }
 
+    private static function wantsSearch(array $messages): bool
+    {
+        foreach (array_reverse($messages) as $m) {
+            if (($m['role'] ?? '') !== 'user') {
+                continue;
+            }
+            $c    = $m['content'] ?? '';
+            $text = is_array($c) ? implode(' ', array_map(static fn($p) => (string) ($p['text'] ?? ''), $c)) : (string) $c;
+            return mb_strlen(trim($text)) >= 12;
+        }
+        return false;
+    }
+
     private static function searchText(string $query): string
     {
         $rows = Search::results($query, 5);
+        logWarn('ai', 'web_search "' . mb_substr($query, 0, 60) . '" -> ' . count($rows) . ' results');
         if (!$rows) {
             return 'No results.';
         }
