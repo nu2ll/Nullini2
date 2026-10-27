@@ -26,9 +26,6 @@ final class WebSearch
     {
         return [
             'name'        => 'web_search',
-            'description' => 'Search the web for fresh or unknown facts: news, prices, exchange rates, scores, weather, recent events, people, products. '
-                . 'Do NOT use it for chit-chat, opinions, math, translation, or things you already know well. '
-                . 'Write the query in whichever language is best for finding the answer (often English).',
             'parameters'  => [
                 'type'       => 'object',
                 'properties' => [
