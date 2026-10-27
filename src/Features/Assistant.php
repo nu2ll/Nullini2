@@ -377,7 +377,7 @@ final class Assistant
             'chat_id'          => $msg['chat']['id'],
             'voice'            => new CURLFile($file, 'audio/ogg', 'voice.ogg'),
             'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
-        ], 60);
+        ], 120);
         @unlink($file);
     }
 
@@ -404,6 +404,11 @@ final class Assistant
         $from     = $msg['from'] ?? [];
         $userId   = (int) ($from['id'] ?? 0);
         $service  = AI::isServiceSender($from, $msg['sender_chat'] ?? null);
+
+        if (!$service && AI::busy($userId)) {
+            $tg->reply($msg, AI::BUSY_TEXT);
+            return;
+        }
 
         $tg->action($chatId, 'typing');
         Users::hit($chatType === 'private' ? 'ai:private' : 'ai:group');

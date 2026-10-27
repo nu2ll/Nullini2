@@ -17,11 +17,23 @@ final class AI
 
     public const FAIL_TEXT = '😕 الان مغزم هنگ کرده، یه‌کم دیگه دوباره بپرس.';
 
+    public const WAIT = 20;
+
+    public const BUSY_TEXT = "⏳ هر ۲۰ ثانیه فقط یه درخواست از نالینی!\nیه‌کم دیگه بیا 😅";
+
     private const API = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
 
     private const STREAM_API = 'https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse';
 
     private const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'];
+
+    public static function busy(int $uid): bool
+    {
+        if ($uid <= 0 || App::isAdmin($uid)) {
+            return false;
+        }
+        return Store::update('rl', 'ai_' . $uid, static fn($at) => (is_int($at) && time() - $at < self::WAIT) ? null : time()) === null;
+    }
 
     public static function keys(): array
     {
@@ -358,7 +370,7 @@ final class AI
         if (!$keys || $text === '') {
             return null;
         }
-        $deadline ??= microtime(true) + 45;
+        $deadline ??= microtime(true) + 90;
         $n         = count($keys);
         $start     = self::startIndex($n);
 
@@ -366,7 +378,7 @@ final class AI
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];
                 $left = $deadline - microtime(true);
-                if ($left < 5) {
+                if ($left < 10) {
                     return null;
                 }
                 if (self::isCooling($key, $model)) {
@@ -378,7 +390,7 @@ final class AI
                         'responseModalities' => ['AUDIO'],
                         'speechConfig'       => ['voiceConfig' => ['prebuiltVoiceConfig' => ['voiceName' => 'Kore']]],
                     ],
-                ], ['x-goog-api-key: ' . $key], (int) max(8, min($left, 40)));
+                ], ['x-goog-api-key: ' . $key], (int) max(16, min($left, 80)));
 
                 $b64 = $r['data']['candidates'][0]['content']['parts'][0]['inlineData']['data'] ?? null;
                 if ($r['code'] === 200 && is_string($b64) && $b64 !== '') {
@@ -411,7 +423,7 @@ final class AI
         $out   = $base . '.' . $ext;
         $codec = $ext === 'mp3' ? '-c:a libmp3lame -b:a 64k' : '-c:a libopus -b:a 32k -application voip';
         file_put_contents($in, $pcm);
-        @exec('timeout 30 ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i ' . escapeshellarg($in) . ' -t 60 ' . $codec . ' ' . escapeshellarg($out) . ' 2>&1', $o, $rc);
+        @exec('timeout 60 ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i ' . escapeshellarg($in) . ' -t 120 ' . $codec . ' ' . escapeshellarg($out) . ' 2>&1', $o, $rc);
         @unlink($in);
         @unlink($base);
         if ($rc !== 0 || !is_file($out) || filesize($out) < 200) {

@@ -246,7 +246,7 @@ final class Telegram
             'chat_id'              => $chatId,
             'voice'                => new CURLFile($file, 'audio/ogg', 'voice.ogg'),
             'disable_notification' => true,
-        ], 90);
+        ], 180);
         if (empty($r['ok'])) {
             return null;
         }

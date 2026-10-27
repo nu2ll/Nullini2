@@ -34,6 +34,11 @@ final class GuestHandler
             return;
         }
 
+        if (AI::busy((int) ($from['id'] ?? 0))) {
+            self::send($qid, AI::BUSY_TEXT);
+            return;
+        }
+
         $voiceIn = isset($msg['voice']);
         $imid    = $voiceIn ? null : self::send($qid, '🧠 نالینی داره فکر می‌کنه...');
 

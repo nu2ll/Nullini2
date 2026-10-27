@@ -151,6 +151,10 @@ final class InlineHandler
             return;
         }
         $tg = App::tg();
+        if ($job['kind'] === 'ai' && AI::busy((int) ($job['from']['id'] ?? 0))) {
+            $tg->editInline($imid, AI::BUSY_TEXT, null, false);
+            return;
+        }
         if ($job['kind'] === 'ai' && is_array($job['from'] ?? null) && self::smart((string) $job['q'], (array) $job['from'], $imid)) {
             return;
         }
