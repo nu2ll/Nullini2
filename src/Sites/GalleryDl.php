@@ -41,18 +41,7 @@ final class GalleryDl
             return [];
         }
         $url  = self::resolve($url);
-        $args = [$bin, '--config-ignore', '-j', '-o', 'timeout=15'];
-        if (($jar = Downloader::cookiesFile()) !== null) {
-            $args[] = '--cookies';
-            $args[] = $jar;
-        }
-        $proxy = (string) env('DL_PROXY', '');
-        if ($proxy !== '') {
-            $args[] = '--proxy';
-            $args[] = $proxy;
-        }
-        $args[] = $url;
-        $res  = Downloader::exec($args, 45);
+        $res  = self::list($bin, $url);
         $raw  = $res['out'];
         $sets = self::parse($res['out']);
         $host = (string) parse_url($url, PHP_URL_HOST);
@@ -84,6 +73,60 @@ final class GalleryDl
     {
         $lines = array_values(array_filter(array_map('trim', explode("\n", $err)), static fn($l) => $l !== ''));
         return mb_substr((string) end($lines), 0, 300);
+    }
+
+    private static function list(string $bin, string $url): array
+    {
+        $args = [$bin, '--config-ignore', '-j', '-o', 'timeout=15'];
+        if (($jar = Downloader::cookiesFile()) !== null) {
+            $args[] = '--cookies';
+            $args[] = $jar;
+        }
+        $proxy = (string) env('DL_PROXY', '');
+        if ($proxy !== '') {
+            $args[] = '--proxy';
+            $args[] = $proxy;
+        }
+        $args[] = $url;
+        return Downloader::exec($args, 45);
+    }
+
+    public static function kinds(string $url): array
+    {
+        $key = 'gdl_kinds:' . md5($url);
+        $hit = Store::get('cache', $key);
+        if (is_array($hit) && time() - (int) ($hit['at'] ?? 0) < 1800) {
+            return (array) $hit['v'];
+        }
+        $bin = self::bin();
+        if ($bin === null) {
+            return [];
+        }
+        $res  = self::list($bin, $url);
+        $kind = self::kindsOf($res['out']);
+        logInfo('dl', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ' kinds=' . implode('', $kind));
+        Store::set('cache', $key, ['at' => time(), 'v' => $kind]);
+        return $kind;
+    }
+
+    public static function kindsOf(string $json): array
+    {
+        $data = json_decode(trim($json), true);
+        $out  = [];
+        foreach (is_array($data) ? $data : [] as $row) {
+            if (!is_array($row) || ($row[0] ?? null) !== 3) {
+                continue;
+            }
+            $url = (string) ($row[1] ?? '');
+            $ext = strtolower((string) (is_array($row[2] ?? null) ? ($row[2]['extension'] ?? '') : ''));
+            $ext = $ext !== '' ? $ext : strtolower(pathinfo((string) parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+            if (str_starts_with($url, 'ytdl:') || in_array($ext, self::VIDEO, true)) {
+                $out[] = 'v';
+            } elseif (in_array($ext, self::IMAGE, true)) {
+                $out[] = 'p';
+            }
+        }
+        return array_slice($out, 0, self::MAX);
     }
 
     public static function download(string $url, string $dir, int $timeout, int $limit): array

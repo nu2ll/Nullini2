@@ -298,6 +298,8 @@ check('ig strip img_index only', Downloader::cleanUrl('https://www.instagram.com
 check('ig strip img_index keep igsh', Downloader::cleanUrl('https://www.instagram.com/p/AbC/?igsh=x&img_index=3', 'instagram'), 'https://www.instagram.com/p/AbC/?igsh=x');
 check('ig strip img_index first', Downloader::cleanUrl('https://www.instagram.com/p/AbC/?img_index=1&igsh=x', 'instagram'), 'https://www.instagram.com/p/AbC/?igsh=x');
 check('other site untouched', Downloader::cleanUrl('https://x.com/a?img_index=2', 'twitter'), 'https://x.com/a?img_index=2');
+check('gdl kinds mixed', GalleryDl::kindsOf((string) json_encode([[2, []], [3, 'https://cdn.x/1.jpg?a=1', ['extension' => 'jpg']], [3, 'https://cdn.x/2.mp4', ['extension' => 'mp4']], [3, 'https://cdn.x/3.webp', []]])), ['p', 'v', 'p']);
+check('gdl kinds garbage', GalleryDl::kindsOf('nope'), []);
 check('gdl supports', [GalleryDl::supports('instagram'), GalleryDl::supports('pinterest'), GalleryDl::supports('reddit')], [true, true, false]);
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');

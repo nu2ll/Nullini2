@@ -272,6 +272,9 @@ final class Downloader
 
         $multi = $sp === null && empty($t['imid']) && in_array($link['site'], self::MULTI, true);
         $p     = self::probe($link['url'], $multi);
+        if (isset($p['error']) && $multi && $link['site'] === 'instagram' && count($ks = GalleryDl::kinds($link['url'])) > 1 && in_array('v', $ks, true)) {
+            $p = ['info' => ['count' => count($ks), 'kinds' => $ks, 'title' => '', 'webpage_url' => $link['url']]];
+        }
         if (isset($p['error'])) {
             if (!$photos()) {
                 self::show($t, $p['error']);
@@ -281,6 +284,11 @@ final class Downloader
         $info  = $p['info'];
         $count = (int) ($info['count'] ?? 1);
         logInfo('dl', "probe {$link['site']}: count={$count} kinds=" . implode('', (array) ($info['kinds'] ?? [])) . ' video=' . (self::hasVideo($info) ? '1' : '0') . ' multi=' . ($multi ? '1' : '0'));
+        if ($multi && $count <= 1 && $link['site'] === 'instagram' && count($ks = GalleryDl::kinds($link['url'])) > 1) {
+            $info['count'] = $count = count($ks);
+            $info['kinds'] = $ks;
+            logInfo('dl', "gallery-dl overrides probe: count={$count} kinds=" . implode('', $ks));
+        }
         if ($multi && $count > 1 && (in_array('v', (array) ($info['kinds'] ?? []), true) || !Photos::supports($link['site']))) {
             $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
             self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));
