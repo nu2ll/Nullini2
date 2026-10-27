@@ -167,7 +167,37 @@ final class AI
             $messages = self::audioToText($messages, explode(':', $route, 2)[0], $opt['deadline'] ?? null);
             return $messages === null ? null : FreeAI::chat($route, $messages, $opt);
         }
+        if (!empty($opt['search']) && FreeAI::keys('groq') && !self::hasMedia($messages)) {
+            $until = min($opt['deadline'] ?? (microtime(true) + 60), microtime(true) + 30);
+            foreach (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'] as $gm) {
+                if ($until - microtime(true) < 4) {
+                    break;
+                }
+                $text = FreeAI::chat('groq:' . $gm, $messages, ['deadline' => $until, 'search' => true, 'temperature' => $opt['temperature'] ?? 0.7]);
+                if ($text !== null) {
+                    return $text;
+                }
+            }
+            logWarn('ai', 'groq search failed, falling back to gemini without search');
+            self::$sources = [];
+        }
+        $opt['search'] = false;
         return self::gemini($messages, $opt, $route === 'gemini' ? null : substr($route, 7));
+    }
+
+    private static function hasMedia(array $messages): bool
+    {
+        foreach ($messages as $m) {
+            if (!is_array($m['content'] ?? null)) {
+                continue;
+            }
+            foreach ($m['content'] as $p) {
+                if (is_array($p) && ($p['type'] ?? '') !== 'text') {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static function audioToText(array $messages, string $prov, ?float $deadline): ?array
@@ -217,7 +247,6 @@ final class AI
         $chain = $only !== null ? [$only] : self::models($opt['tier'] ?? 'smart');
         foreach ($chain as $model) {
             $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : null;
-            $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma') ? (self::hasUrl($messages) ? 2 : 1) : 0;
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];
                 if (self::isCooling($key, $model)) {
@@ -237,17 +266,13 @@ final class AI
                 if ($thinking && !$gemma) {
                     $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking];
                 }
-                if ($tools > 0) {
-                    $payload['tools'] = $tools > 1 ? [['google_search' => new stdClass()], ['url_context' => new stdClass()]] : [['google_search' => new stdClass()]];
-                }
                 $r = is_callable($opt['stream'] ?? null)
                     ? self::geminiStream($model, $payload, $key, (int) max(5, min($left, 55)), $opt['stream'])
-                    : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, $tools > 0 ? 20 : 10)));
+                    : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, 10)));
 
                 if ($r['code'] === 200 && $r['data'] !== null) {
                     $text = self::extractText($r['data']);
                     if ($text !== null) {
-                        self::$sources = self::groundingSources($r['data']);
                         Users::hit('model:' . $model);
                         return $text;
                     }
@@ -256,15 +281,9 @@ final class AI
                 }
 
                 $raw = (string) $r['raw'];
-                logWarn('ai', "{$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $raw), 0, 160));
+                logWarn('ai', "{$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $raw), 0, 160) . ($r['code'] === 429 ? ' | ' . preg_replace('/\s+/', ' ', mb_substr($raw, 0, 600)) : ''));
 
                 switch (true) {
-                    case $tools > 1 && $r['code'] === 400 && preg_match('/tool|search|ground|url_context/i', $raw) === 1:
-                        $tools = 1; // url_context رو بردار ولی سرچ گوگل بمونه
-                        $i--;
-                        break;
-                    case $tools > 0 && $r['code'] === 400 && preg_match('/tool|search|ground/i', $raw) === 1:
-                        continue 3; // این مدل سرچ رو نمی‌گیره؛ برو سراغ مدل بعدی (بدون سرچ جواب نده)
                     case $r['code'] === 429:
                         if (preg_match('/per ?day|PerDay|daily/i', $raw)) {
                             self::cool($key, $model, self::quotaResetAt(), 'سهمیه‌ی روزانه تموم شد');
@@ -297,37 +316,20 @@ final class AI
         return null;
     }
 
-    private static function hasUrl(array $messages): bool
-    {
-        foreach (array_reverse($messages) as $m) {
-            if (($m['role'] ?? '') !== 'user') {
-                continue;
-            }
-            $c = $m['content'] ?? '';
-            $t = is_array($c) ? implode(' ', array_map(static fn($p) => (string) ($p['text'] ?? ''), $c)) : (string) $c;
-            return preg_match('#https?://#i', $t) === 1;
-        }
-        return false;
-    }
-
     private static function geminiStream(string $model, array $payload, string $key, int $timeout, callable $emit): array
     {
         $text   = '';
         $buf    = '';
         $finish = null;
-        $gm     = [];
 
         $r = Http::stream(sprintf(self::STREAM_API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], $timeout,
-            static function (string $chunk) use (&$text, &$buf, &$finish, &$gm, $emit): void {
+            static function (string $chunk) use (&$text, &$buf, &$finish, $emit): void {
                 foreach (Http::sseData($buf, $chunk) as $json) {
                     $d = json_decode($json, true);
                     if (!is_array($d)) {
                         continue;
                     }
                     $finish = $d['candidates'][0]['finishReason'] ?? $d['promptFeedback']['blockReason'] ?? $finish;
-                    if (!empty($d['candidates'][0]['groundingMetadata']['groundingChunks'])) {
-                        $gm = $d['candidates'][0]['groundingMetadata'];
-                    }
                     $delta  = '';
                     foreach ($d['candidates'][0]['content']['parts'] ?? [] as $p) {
                         if (empty($p['thought']) && isset($p['text'])) {
@@ -345,7 +347,7 @@ final class AI
             if ($text === '' && $r['error'] !== '') {
                 return ['code' => 0, 'data' => null, 'raw' => $r['error']];
             }
-            $cand = $text !== '' ? ['content' => ['parts' => [['text' => $text]]], 'groundingMetadata' => $gm] : ['finishReason' => $finish];
+            $cand = $text !== '' ? ['content' => ['parts' => [['text' => $text]]]] : ['finishReason' => $finish];
             return ['code' => 200, 'data' => ['candidates' => [$cand]], 'raw' => ''];
         }
 
@@ -429,18 +431,6 @@ final class AI
         if ($rc !== 0 || !is_file($out) || filesize($out) < 200) {
             @unlink($out);
             return null;
-        }
-        return $out;
-    }
-
-    private static function groundingSources(array $data): array
-    {
-        $out = [];
-        foreach ($data['candidates'][0]['groundingMetadata']['groundingChunks'] ?? [] as $c) {
-            $u = (string) ($c['web']['uri'] ?? '');
-            if ($u !== '') {
-                $out[] = ['t' => (string) ($c['web']['title'] ?? ''), 'u' => $u];
-            }
         }
         return $out;
     }
