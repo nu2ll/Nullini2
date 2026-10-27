@@ -200,8 +200,8 @@ final class AI
 
         $chain = $only !== null ? [$only] : self::models($opt['tier'] ?? 'smart');
         foreach ($chain as $model) {
-            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : (str_contains($model, 'lite') && !empty($opt['search']) ? 'medium' : null);
-            $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma') ? 2 : 0;
+            $thinking = array_key_exists('thinking', $opt) ? $opt['thinking'] : null;
+            $tools    = !empty($opt['search']) && !str_starts_with($model, 'gemma') ? (self::hasUrl($messages) ? 2 : 1) : 0;
             for ($i = 0; $i < $n; $i++) {
                 $key = $keys[($start + $i) % $n];
                 if (self::isCooling($key, $model)) {
@@ -242,10 +242,12 @@ final class AI
                 logWarn('ai', "{$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $raw), 0, 160));
 
                 switch (true) {
-                    case $tools > 0 && ($r['code'] === 429 || ($r['code'] === 400 && preg_match('/tool|search|ground|url_context/i', $raw) === 1)):
-                        $tools = $r['code'] === 429 ? 0 : $tools - 1;
+                    case $tools > 1 && $r['code'] === 400 && preg_match('/tool|search|ground|url_context/i', $raw) === 1:
+                        $tools = 1; // url_context رو بردار ولی سرچ گوگل بمونه
                         $i--;
                         break;
+                    case $tools > 0 && $r['code'] === 400 && preg_match('/tool|search|ground/i', $raw) === 1:
+                        continue 3; // این مدل سرچ رو نمی‌گیره؛ برو سراغ مدل بعدی (بدون سرچ جواب نده)
                     case $r['code'] === 429:
                         if (preg_match('/per ?day|PerDay|daily/i', $raw)) {
                             self::cool($key, $model, self::quotaResetAt(), 'سهمیه‌ی روزانه تموم شد');
@@ -276,6 +278,19 @@ final class AI
             }
         }
         return null;
+    }
+
+    private static function hasUrl(array $messages): bool
+    {
+        foreach (array_reverse($messages) as $m) {
+            if (($m['role'] ?? '') !== 'user') {
+                continue;
+            }
+            $c = $m['content'] ?? '';
+            $t = is_array($c) ? implode(' ', array_map(static fn($p) => (string) ($p['text'] ?? ''), $c)) : (string) $c;
+            return preg_match('#https?://#i', $t) === 1;
+        }
+        return false;
     }
 
     private static function geminiStream(string $model, array $payload, string $key, int $timeout, callable $emit): array

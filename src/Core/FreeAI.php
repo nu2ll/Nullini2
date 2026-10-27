@@ -6,21 +6,17 @@ final class FreeAI
         'groq'       => ['name' => 'Groq', 'url' => 'https://api.groq.com/openai/v1'],
     ];
 
-    private const SKIP = '/embed|whisper|tts|guard|moderat|rerank|orpheus|playai|transcri|speech|diffusion|flux|ocr|safety|reward|retriev|parakeet|canary/i';
-    private const EXTRA = ['groq' => ['groq/compound']];
-    private const VISION = '/scout|maverick|vision|llava|\bvl\b|qwen3\.\d/i';
-    private const SEARCH_TOOL = [
-        'type'     => 'function',
-        'function' => [
-            'name'        => 'web_search',
-            'description' => 'Search the web. Use it before answering when the question involves recent events, news, people, prices or anything you are not sure about.',
-            'parameters'  => [
-                'type'       => 'object',
-                'properties' => ['query' => ['type' => 'string', 'description' => 'search query']],
-                'required'   => ['query'],
-            ],
+    // لیست ثابت مدل‌ها (دیگه از API گرفته نمی‌شه). برای کم/زیاد کردن فقط همین لیست رو عوض کن.
+    private const MODELS = [
+        'groq' => [
+            'openai/gpt-oss-120b',
+            'openai/gpt-oss-20b',
+            'qwen/qwen3.8-27b',
+            'llama-3.3-70b-versatile',
+            'llama-3.1-8b-instant',
         ],
     ];
+    private const VISION = '/scout|maverick|vision|llava|\bvl\b|qwen3\.\d/i';
 
     public static function keys(string $prov): array
     {
@@ -50,13 +46,7 @@ final class FreeAI
         if (!isset(self::PROVIDERS[$prov])) {
             return [];
         }
-        $list = Store::remember('ai', 'models_' . $prov, 60, static fn() => self::fetch($prov));
-        $list = is_array($list) ? $list : [];
-        foreach (self::EXTRA[$prov] ?? [] as $id) {
-            if (!in_array($id, array_column($list, 'id'), true)) {
-                $list[] = ['id' => $id, 'name' => $id, 'vision' => null];
-            }
-        }
+        $list = array_map(static fn($id) => ['id' => $id, 'name' => $id, 'vision' => null], self::MODELS[$prov] ?? []);
         if (!empty(App::cfg('ai', [])['free_only'][$prov])) {
             $only = array_map('strval', (array) (App::cfg('ai', [])['free_order'][$prov] ?? []));
             $list = array_values(array_filter($list, static fn($e) => in_array($e['id'] ?? '', $only, true)));
@@ -72,40 +62,12 @@ final class FreeAI
 
     private static function entry(string $prov, string $model): ?array
     {
-        $hit = Store::get('ai', 'models_' . $prov);
-        foreach ((array) ($hit['v'] ?? []) as $e) {
+        foreach (self::models($prov) as $e) {
             if (($e['id'] ?? '') === $model) {
                 return $e;
             }
         }
         return null;
-    }
-
-    private static function fetch(string $prov): ?array
-    {
-        $keys = self::keys($prov);
-        $rows = Http::getJson(self::PROVIDERS[$prov]['url'] . '/models', $keys ? ['Authorization: Bearer ' . $keys[0]] : [], 20)['data'] ?? null;
-        if (!is_array($rows)) {
-            logWarn('ai', "{$prov}: model list failed");
-            return null;
-        }
-
-        $out = [];
-        foreach ($rows as $m) {
-            $id = (string) ($m['id'] ?? '');
-            if ($id === '' || preg_match(self::SKIP, $id) || ($m['active'] ?? true) === false) {
-                continue;
-            }
-            $name   = $id;
-            $vision = null;
-            $out[] = ['id' => $id, 'name' => $name, 'vision' => $vision];
-        }
-        if (!$out) {
-            logWarn('ai', "{$prov}: no usable models");
-            return null;
-        }
-        usort($out, static fn($a, $b) => strcasecmp($a['name'], $b['name']));
-        return $out;
     }
 
     public static function chat(string $route, array $messages, array $opt = []): ?string
@@ -330,18 +292,12 @@ final class FreeAI
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
         $wants    = $prov === 'groq' && !empty($opt['search']);
         $search   = $wants && preg_match('/gpt-oss/i', $model) === 1;
-        $fnSearch = $wants && !$search && !str_contains($model, 'compound');
         if ($search) {
             $payload['tools'] = [['type' => 'browser_search']];
-        } elseif ($fnSearch) {
-            $payload['tools'] = [self::SEARCH_TOOL];
         }
         $orig     = $payload['messages'];
         $rounds   = 0;
-        if ($fnSearch && self::wantsSearch($messages)) {
-            $payload['tool_choice'] = 'required';
-        }
-        $cap      = $prov === 'groq' ? ($search || str_contains($model, 'compound') ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
+        $cap      = $prov === 'groq' ? ($search ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
         $url      = self::PROVIDERS[$prov]['url'] . '/chat/completions';
         $n        = count($keys);
         $start    = random_int(0, $n - 1);
@@ -360,17 +316,6 @@ final class FreeAI
 
             if ($r['code'] === 200 && $r['data'] !== null) {
                 $msg = $r['data']['choices'][0]['message'] ?? [];
-                if ($fnSearch && $rounds < 2 && !empty($msg['tool_calls']) && is_array($msg['tool_calls'])) {
-                    $rounds++;
-                    $payload['messages'][] = ['role' => 'assistant', 'content' => (string) ($msg['content'] ?? ''), 'tool_calls' => $msg['tool_calls']];
-                    foreach ($msg['tool_calls'] as $tc) {
-                        $args = json_decode((string) ($tc['function']['arguments'] ?? ''), true);
-                        $payload['messages'][] = ['role' => 'tool', 'tool_call_id' => (string) ($tc['id'] ?? ''), 'content' => self::searchText((string) (is_array($args) ? ($args['query'] ?? '') : ''))];
-                    }
-                    $payload['tool_choice'] = $rounds >= 2 ? 'none' : 'auto';
-                    $i--;
-                    continue;
-                }
                 $text = self::extract($r['data']);
                 if ($text === null) {
                     logWarn('ai', "{$route}: empty reply");
@@ -381,11 +326,10 @@ final class FreeAI
             }
 
             logWarn('ai', "{$route} key{$idx} HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $r['raw']), 0, 160));
-            if (($search || $fnSearch) && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
+            if ($search && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
                 unset($payload['tools'], $payload['tool_choice']);
                 $payload['messages'] = $orig;
                 $search              = false;
-                $fnSearch            = false;
                 $i--;
                 continue;
             }
@@ -478,29 +422,6 @@ final class FreeAI
             $out[] = ['role' => $role, 'content' => $image ? $parts : implode("\n", array_column($parts, 'text'))];
         }
         return $out ?: null;
-    }
-
-    private static function wantsSearch(array $messages): bool
-    {
-        foreach (array_reverse($messages) as $m) {
-            if (($m['role'] ?? '') !== 'user') {
-                continue;
-            }
-            $c    = $m['content'] ?? '';
-            $text = is_array($c) ? implode(' ', array_map(static fn($p) => (string) ($p['text'] ?? ''), $c)) : (string) $c;
-            return mb_strlen(trim($text)) >= 12;
-        }
-        return false;
-    }
-
-    private static function searchText(string $query): string
-    {
-        $rows = Search::results($query, 5);
-        logWarn('ai', 'web_search "' . mb_substr($query, 0, 60) . '" -> ' . count($rows) . ' results');
-        if (!$rows) {
-            return 'No results.';
-        }
-        return implode("\n\n", array_map(static fn($r) => $r['title'] . "\n" . $r['snippet'] . "\n" . $r['url'], $rows));
     }
 
     private static function mergeSystem(array $messages): array
