@@ -5,7 +5,7 @@ return [
     'bot_username' => env('BOT_USERNAME', ''),
     'bot_tokens'    => [env('BOT_TOKEN', ''), env('BOT_TOKEN_2', '')],
     'bot_usernames' => [env('BOT_USERNAME', ''), env('BOT_USERNAME_2', '')],
-    'premium_packs' => ['RestrictedEmoji'],
+    'premium_packs' => ['RestrictedEmoji', 'NewsEmoji'],
     'bot_name'     => 'نالینی | Nullini',
     'bot_version'  => '4.9.7',
     'admins'       => array_values(array_unique(array_filter(array_map('intval', array_merge(envList('ADMIN_IDS'), envList('OWNER_ID')))))),

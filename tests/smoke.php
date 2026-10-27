@@ -189,8 +189,19 @@ check('start text', str_contains(Ui::startText(['id' => 1, 'first_name' => '<b>x
 check('icon url', str_starts_with(Ui::icon('chess'), 'https://raw.githubusercontent.com/'), true);
 check('calc done', Calculator::render('8', true), "<b>🧮 ماشین‌حساب نالینی</b>\n\n= <b>8</b>");
 check('calc typing no preview', str_contains(Calculator::render('2+3'), '='), false);
-check('commands admin', count(Ui::commands('admin')), 12);
+check('commands admin', count(Ui::commands('admin')), 16);
 check('commands private', count(Ui::commands('private')), 7);
+check('switch default on', Switches::on('chess'), true);
+Switches::toggle('image');
+check('switch off', Switches::on('image'), false);
+check('commands hide img', in_array('img', array_column(Ui::commands('private'), 'command'), true), false);
+check('commands private off', count(Ui::commands('private')), 6);
+Switches::toggle('image');
+check('switch back on', Switches::on('image'), true);
+check('commands show img', in_array('img', array_column(Ui::commands('private'), 'command'), true), true);
+Switches::toggle('chess');
+check('games independent', [Switches::on('chess'), Switches::on('ttt')], [false, true]);
+Switches::toggle('chess');
 $gs = ['mode' => 'pvp', 'p1' => ['id' => 1, 'name' => 'a'], 'p2' => null, 'status' => 'playing'];
 check('control cancel', GameKit::controlRow($gs, 'ttt')[0]['callback_data'], 'ttt:cancel');
 $gs['p2'] = ['id' => 2, 'name' => 'b'];
@@ -322,6 +333,204 @@ check('slot grapes', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '�
 check('slot bars', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '🎰', 'value' => 1]])[1], 'بار - بار - بار'), true);
 check('basketball name', Assistant::dataInfo(['dice' => ['emoji' => '🏀', 'value' => 5]])[0], 'بسکتبال');
 check('football goal rule', str_contains(Assistant::dataInfo(['dice' => ['emoji' => '⚽', 'value' => 3]])[1], 'عدد ۳ و ۴ و ۵ یعنی گل شد'), true);
+
+// ───────── پوشش بقیه‌ی سورس: سوییچ‌ها، هلپرها، بن، ابزارها، بازی‌ها ─────────
+
+// Switches
+$resetSwitches = static function (): void {
+    $r = new ReflectionProperty(Switches::class, 'off');
+    if (PHP_VERSION_ID < 80100) {
+        $r->setAccessible(true);
+    }
+    $r->setValue(null, null);
+};
+Switches::setAll(true);
+check('switch all on', array_filter(array_keys(Switches::TOOLS), static fn($k) => !Switches::on($k)), []);
+check('switch tools count', count(Switches::TOOLS), 26);
+check('switch no old games key', isset(Switches::TOOLS['games']), false);
+foreach (['chess', 'ttt', 'c4', 'rps', 'math'] as $g) {
+    check("switch game key {$g}", isset(Switches::TOOLS[$g]), true);
+}
+check('switch unknown key stays on', Switches::on('no_such_tool'), true);
+Switches::toggle('no_such_tool');
+check('switch unknown toggle ignored', Switches::on('no_such_tool'), true);
+Switches::setAll(false);
+check('switch all off', array_filter(array_keys(Switches::TOOLS), static fn($k) => Switches::on($k)), []);
+check('switch guard off', Switches::guard('ai'), false);
+check('commands all off private', array_column(Ui::commands('private'), 'command'), ['start', 'help']);
+Switches::setAll(true);
+check('switch guard on', Switches::guard('ai'), true);
+check('switch text no off line', str_contains(Switches::text(), '⛔ خاموش:'), false);
+Switches::toggle('qr');
+check('switch text counts off', str_contains(Switches::text(), '⛔ خاموش: ۱ از ' . fa((string) count(Switches::TOOLS))), true);
+Switches::toggle('qr');
+$kbButtons = array_merge(...Switches::keyboard()['inline_keyboard']);
+check('switch keyboard buttons', count($kbButtons), count(Switches::TOOLS) + 2);
+check('switch keyboard callbacks short', array_filter($kbButtons, static fn($b) => strlen($b['callback_data']) > 64), []);
+check('switch keyboard toggles', count(array_filter($kbButtons, static fn($b) => str_starts_with($b['callback_data'], 'tl:t:'))), count(Switches::TOOLS));
+check('switch keyboard all buttons', array_values(array_map(static fn($b) => $b['callback_data'], array_slice($kbButtons, -2))), ['tl:all:1', 'tl:all:0']);
+Switches::toggle('chess');
+$kbOff = array_values(array_filter(array_merge(...Switches::keyboard()['inline_keyboard']), static fn($b) => $b['callback_data'] === 'tl:t:chess'));
+check('switch keyboard shows off', str_starts_with($kbOff[0]['text'], '⛔'), true);
+Switches::toggle('chess');
+// سوییچ قدیمی «games» → هر پنج بازی خاموش
+Store::set('cfg', 'tools_off', ['games', 'qr']);
+$resetSwitches();
+check('legacy games chess', Switches::on('chess'), false);
+check('legacy games ttt', Switches::on('ttt'), false);
+check('legacy games c4', Switches::on('c4'), false);
+check('legacy games rps', Switches::on('rps'), false);
+check('legacy games math', Switches::on('math'), false);
+check('legacy keeps others', [Switches::on('qr'), Switches::on('ai')], [false, true]);
+Switches::setAll(true);
+$resetSwitches();
+check('switch persisted on', Switches::on('qr'), true);
+Switches::toggle('qr');
+$resetSwitches();
+check('switch persists across reload', Switches::on('qr'), false);
+Switches::setAll(true);
+// هر دستور منو باید به یه سوییچ واقعی وصل باشه
+foreach (Switches::COMMAND_SWITCH as $cmd => $sw) {
+    check("command switch {$cmd}", isset(Switches::TOOLS[$sw]), true);
+}
+// کلیدهای Intent باید همه سوییچ داشته باشن (وگرنه خاموش‌شدن اثر نمی‌کنه)
+foreach (Intent::NAMES as $n) {
+    check("intent switch {$n}", isset(Switches::TOOLS[$n]), true);
+}
+// هر بازیِ هندلر دکمه‌ها باید سوییچ خودش رو داشته باشه
+foreach (array_keys((new ReflectionClass('CallbackHandler'))->getConstant('GAMES')) as $g) {
+    check("callback game switch {$g}", isset(Switches::TOOLS[$g]), true);
+}
+foreach (['private', 'group', 'admin'] as $scope) {
+    $names = array_column(Ui::commands($scope), 'command');
+    check("commands unique {$scope}", count($names), count(array_unique($names)));
+    check("commands described {$scope}", array_filter(Ui::commands($scope), static fn($c) => $c['description'] === '' || !preg_match('/^[a-z_]{1,32}$/', $c['command'])), []);
+}
+check('commands admin has tools', in_array('tools', array_column(Ui::commands('admin'), 'command'), true), true);
+check('commands private no tools', in_array('tools', array_column(Ui::commands('private'), 'command'), true), false);
+foreach (['tr' => 'translate', 'ft' => 'font', 'gw' => 'giveaway', 'wk' => 'wiki'] as $cmd => $sw) {
+    Switches::toggle($sw);
+    check("commands hide {$cmd}", in_array($cmd, array_column(Ui::commands('admin'), 'command'), true), false);
+    Switches::toggle($sw);
+    check("commands show {$cmd}", in_array($cmd, array_column(Ui::commands('admin'), 'command'), true), true);
+}
+
+// helpers
+check('h escapes', h("<a href='x'>&"), '&lt;a href=&#039;x&#039;&gt;&amp;');
+check('h null', h(null), '');
+check('fa digits', fa('2026/10/27'), '۲۰۲۶/۱۰/۲۷');
+check('en digits', en('۱۲۳٤٥'), '12345');
+check('fa en roundtrip', en(fa('9876543210')), '9876543210');
+check('btn default style', btn('a', 'b'), ['text' => 'a', 'callback_data' => 'b', 'style' => 'primary']);
+check('btn no style', btn('a', 'b', null), ['text' => 'a', 'callback_data' => 'b']);
+check('urlBtn', urlBtn('a', 'https://x.y', 'success'), ['text' => 'a', 'url' => 'https://x.y', 'style' => 'success']);
+check('ikb drops empty rows', ikb([[btn('a', 'b')], [], [btn('c', 'd')]])['inline_keyboard'] === [[btn('a', 'b')], [btn('c', 'd')]], true);
+check('userName both', userName(['first_name' => 'علی', 'last_name' => 'رضایی']), 'علی رضایی');
+check('userName first only', userName(['first_name' => 'Ali']), 'Ali');
+check('userName fallback', userName([]), 'کاربر');
+check('safeName escapes', safeName(['first_name' => '<b>']), bidi('&lt;b&gt;'));
+check('safeName max', safeName(['first_name' => 'abcdef'], 3), bidi('abc'));
+check('userTag id', userTag(5, 'Ali'), '<a href="tg://user?id=5">' . bidi('Ali') . '</a>');
+check('userTag username only', userTag(null, '', 'bob'), '@bob');
+check('userTag name only', userTag(null, 'Ali'), bidi('Ali'));
+check('env default', env('NULLINI_NO_SUCH_ENV', 'dflt'), 'dflt');
+putenv('NULLINI_TEST_LIST=a, b  c,,d');
+check('envList split', envList('NULLINI_TEST_LIST'), ['a', 'b', 'c', 'd']);
+check('envList default', envList('NULLINI_NO_SUCH_LIST', ['x']), ['x']);
+putenv('NULLINI_TEST_LIST');
+
+// پک‌های ایموجی پرمیوم (فقط بات دوم ازشون استفاده می‌کنه)
+check('premium packs', App::cfg('premium_packs'), ['RestrictedEmoji', 'NewsEmoji']);
+
+// Ban
+check('ban admin config', is_array(App::cfg('admins', [])), true);
+$uid = 987654321;
+check('ban initially not', Ban::is($uid), false);
+check('ban add', Ban::add($uid, 1), true);
+check('ban is', Ban::is($uid), true);
+check('ban all lists', in_array($uid, Ban::all(), true), true);
+check('ban add invalid id', Ban::add(0, 1), false);
+check('ban add negative', Ban::add(-5, 1), false);
+check('ban is invalid id', Ban::is(0), false);
+check('ban remove', Ban::remove($uid), true);
+check('ban removed', Ban::is($uid), false);
+check('ban remove twice', Ban::remove($uid), false);
+check('ban username invalid', Ban::byUsername('a'), 0);
+check('ban username unknown', Ban::byUsername('@definitely_not_a_user_xyz'), 0);
+check('ban sender message', Ban::senderId(['message' => ['from' => ['id' => 11]]]), 11);
+check('ban sender inline', Ban::senderId(['inline_query' => ['from' => ['id' => 12]]]), 12);
+check('ban sender chosen', Ban::senderId(['chosen_inline_result' => ['from' => ['id' => 13]]]), 13);
+check('ban sender callback', Ban::senderId(['callback_query' => ['from' => ['id' => 14]]]), 14);
+check('ban sender guest caller', Ban::senderId(['guest_message' => ['guest_bot_caller_user' => ['id' => 15], 'from' => ['id' => 99]]]), 15);
+check('ban sender guest from', Ban::senderId(['guest_message' => ['from' => ['id' => 16]]]), 16);
+check('ban sender unknown', Ban::senderId(['poll' => []]), 0);
+
+// Tools
+check('nid valid sample', Tools::isValidNid('0499370899'), true);
+check('nid bad check digit', Tools::isValidNid('0499370898'), false);
+check('nid all same', Tools::isValidNid('1111111111'), false);
+check('nid short', Tools::isValidNid('123'), false);
+check('nid letters', Tools::isValidNid('04993708ab'), false);
+check('nid normalize pad', Tools::normalizeNid('12345678'), '0012345678');
+check('nid normalize persian', Tools::normalizeNid('۰۴۹۹۳۷۰۸۹۹'), '0499370899');
+check('nid normalize dashes', Tools::normalizeNid('049-937-0899'), '0499370899');
+check('nid normalize too short', Tools::normalizeNid('123'), null);
+check('nid normalize too long', Tools::normalizeNid('12345678901'), null);
+check('nid display', Tools::nidDisplay('0012345678'), "\u{2066}001-234567-8\u{2069}");
+check('nid text ok', str_contains(Tools::nidText('0499370899'), 'درسته'), true);
+check('nid text bad', str_contains(Tools::nidText('0499370898'), 'اشتباهه'), true);
+check('qr url host', str_starts_with(Tools::qrUrl('hello'), 'https://api.qrserver.com/v1/create-qr-code/?'), true);
+check('qr url data', str_contains(Tools::qrUrl('hello'), 'data=hello'), true);
+check('qr url size', str_contains(Tools::qrUrl('hello', 256), 'size=256x256'), true);
+check('qr url encodes', str_contains(Tools::qrUrl('a&b=c'), 'data=a%26b%3Dc'), true);
+check('coin result', (bool) preg_match('/شیر|خط/u', Tools::coinResult()), true);
+check('coin keyboard', Tools::coinKeyboard()['inline_keyboard'][0][0]['callback_data'], 'coin:flip');
+check('hafez url', (bool) preg_match('#^https://api\.codebazan\.ir/fal/hafez/(\d{1,3})\.gif$#', Tools::hafezUrl(), $hm) && (int) $hm[1] >= 1 && (int) $hm[1] <= 149, true);
+check('password lengths', [strlen(Tools::password(8)), strlen(Tools::password(24))], [8, 24]);
+check('password clamp', [strlen(Tools::password(1)), strlen(Tools::password(500))], [6, 64]);
+check('password differs', Tools::password(16) !== Tools::password(16), true);
+check('date text nonempty', Tools::dateText() !== '', true);
+
+// Wiki / UserInfo
+check('wiki lang fa', Wiki::lang('سلام'), 'fa');
+check('wiki lang en', Wiki::lang('hello'), 'en');
+check('age tiny', UserInfo::ageText(time() - 5), 'کمتر از یک ماه');
+check('age one month', UserInfo::ageText(time() - 45 * 86400), '۱ ماه');
+check('age one year', UserInfo::ageText(time() - 370 * 86400), '۱ سال');
+check('age year and month', UserInfo::ageText(time() - 400 * 86400), '۱ سال و ۱ ماه');
+check('dc bad fileid', UserInfo::dcFromFileId('***'), null);
+
+// بازی‌ها
+check('ttt row win', TicTacToe::winner(['X', 'X', 'X', '', '', '', '', '', '']), 'X');
+check('ttt col win', TicTacToe::winner(['O', '', '', 'O', 'X', '', 'O', '', 'X']), 'O');
+check('ttt diag win', TicTacToe::winner(['X', 'O', '', 'O', 'X', '', '', '', 'X']), 'X');
+check('ttt anti diag win', TicTacToe::winner(['', '', 'O', 'X', 'O', '', 'O', 'X', '']), 'O');
+check('ttt draw', TicTacToe::winner(['X', 'O', 'X', 'X', 'O', 'O', 'O', 'X', 'X']), 'draw');
+check('ttt ongoing', TicTacToe::winner(['X', 'O', '', '', '', '', '', '', '']), null);
+check('ttt empty', TicTacToe::winner(array_fill(0, 9, '')), null);
+foreach (['TicTacToe', 'ConnectFour', 'Rps', 'MathDuel'] as $cls) {
+    check("{$cls} intro", $cls::intro() !== '', true);
+    check("{$cls} mode keyboard", count($cls::modeKeyboard()['inline_keyboard']) > 0, true);
+}
+check('gamekit player', GameKit::player(['id' => '7', 'first_name' => 'Ali']), ['id' => 7, 'name' => 'Ali']);
+check('gamekit name null', GameKit::name(null), 'حریف');
+check('gamekit name escapes', GameKit::name(['name' => '<b>']), bidi('&lt;b&gt;'));
+$gk = GameKit::fresh('ttt', GameKit::player(['id' => 1, 'first_name' => 'A']), ['mode' => 'pvp']);
+check('gamekit fresh', [$gk['game'], $gk['status'], $gk['p2'], $gk['mode']], ['ttt', 'mode', null, 'pvp']);
+check('gamekit isPlayer', [GameKit::isPlayer($gk, 1), GameKit::isPlayer($gk, 2)], [true, false]);
+check('gamekit isCreator', [GameKit::isCreator($gk, 1), GameKit::isCreator($gk, 2)], [true, false]);
+check('gamekit seat creator', GameKit::seat($gk, ['id' => 1], 1), 1);
+check('gamekit seat early joiner', GameKit::seat($gk, ['id' => 2, 'first_name' => 'B'], 1), 0);
+check('gamekit seat joins', GameKit::seat($gk, ['id' => 2, 'first_name' => 'B'], 2), 2);
+check('gamekit p2 saved', $gk['p2']['id'] ?? null, 2);
+check('gamekit seat third wheel', GameKit::seat($gk, ['id' => 3, 'first_name' => 'C'], 2), 0);
+check('gamekit seat second again', GameKit::seat($gk, ['id' => 2], 1), 2);
+GameKit::save('smoke_imid', $gk);
+check('gamekit save/load', GameKit::load('smoke_imid')['p2']['id'] ?? null, 2);
+check('gamekit load missing', GameKit::load('smoke_missing'), null);
+check('gamekit ensure keeps same game', GameKit::ensure('smoke_imid', 'ttt', ['id' => 9])['p1']['id'], 1);
+check('gamekit ensure new game', GameKit::ensure('smoke_imid', 'c4', ['id' => 9, 'first_name' => 'Z'])['p1']['id'], 9);
+Store::delete(GameKit::NS, 'smoke_imid');
 
 @unlink($db);
 @unlink($db . '-wal');
