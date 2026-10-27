@@ -4,7 +4,6 @@ final class AiPanel
 {
     private const COLS     = ['gemini' => 2];
     private const PER_PAGE = ['gemini' => 12];
-    private const LEVELS   = ['auto' => 'خودکار', 'none' => 'بدون تفکر', 'minimal' => 'حداقل', 'low' => 'کم', 'medium' => 'متوسط', 'high' => 'زیاد'];
 
     public static function providers(): array
     {
@@ -44,54 +43,7 @@ final class AiPanel
         $cur = AI::route();
         return "<b>🤖 پنل هوش مصنوعی</b>\n\n"
             . "مدل فعال روی همه‌ی بخش‌ها:\n<b>" . bidi(h(self::label($cur))) . "</b>"
-            . "\n\n🔎 سرچ وب: <b>" . (AI::searchOn() ? 'روشن' : 'خاموش') . '</b>'
-            . "\n🧠 سطح تفکر: <b>" . self::thinkSummary() . '</b>';
-    }
-
-    private static function thinkSummary(): string
-    {
-        $l = [];
-        foreach (self::providers() as $id => $name) {
-            if (isset(AI::THINK_LEVELS[$id])) {
-                $l[] = h($name) . ' ' . self::LEVELS[AI::thinkLevel($id)];
-            }
-        }
-        return implode(' · ', $l);
-    }
-
-    public static function thinkText(): string
-    {
-        $l = ['<b>🧠 سطح تفکر</b>'];
-        foreach (self::providers() as $id => $name) {
-            if (isset(AI::THINK_LEVELS[$id])) {
-                $l[] = h($name) . ': <b>' . self::LEVELS[AI::thinkLevel($id)] . '</b>';
-            }
-        }
-        $l[] = '⚡ <b>خودکار</b>: تنظیم پیش‌فرض خودِ ربات';
-        $l[] = 'اگه مدلِ فعال اون سطح رو نداشته باشه، نزدیک‌ترین سطحِ پشتیبانی‌شده‌ی خودش اعمال می‌شه (مثلاً gpt-oss «بدون تفکر» نداره و می‌شه «کم»؛ gemma و Gemini 2.5 اصلاً سطح ندارن).';
-        $l[] = 'فقط روی جواب‌های چت اعمال می‌شه؛ ترجمه، روست و بقیه همون سریع می‌مونن.';
-        return implode("\n\n", $l);
-    }
-
-    public static function thinkKeyboard(): array
-    {
-        $rows = [];
-        foreach (self::providers() as $id => $name) {
-            if (!isset(AI::THINK_LEVELS[$id])) {
-                continue;
-            }
-            $rows[] = [btn($name, 'ai:think', null)];
-            $now    = AI::thinkLevel($id);
-            $btns   = [];
-            foreach (array_merge(['auto'], AI::THINK_LEVELS[$id]) as $lv) {
-                $btns[] = btn(($now === $lv ? '✅ ' : '') . self::LEVELS[$lv], "ai:t:{$id}:{$lv}", $now === $lv ? 'success' : 'primary');
-            }
-            foreach (array_chunk($btns, 3) as $chunk) {
-                $rows[] = $chunk;
-            }
-        }
-        $rows[] = [btn('🔙 برگشت', 'ai:home', null)];
-        return ikb($rows);
+            . "\n\n🔎 سرچ وب: <b>" . (AI::searchOn() ? 'روشن' : 'خاموش') . '</b>';
     }
 
     public static function keyboard(): array
@@ -103,7 +55,6 @@ final class AiPanel
             $rows[] = [btn(($on ? '✅ ' : '') . $name . ' ▸', "ai:p:{$id}:0", $on ? 'success' : 'primary')];
         }
         $rows[] = [btn(AI::searchOn() ? '🔎 سرچ: روشن ✅' : '🔎 سرچ: خاموش ⛔', 'ai:search', AI::searchOn() ? 'success' : null)];
-        $rows[] = [btn('🧠 سطح تفکر ▸', 'ai:think')];
         return ikb($rows);
     }
 
@@ -190,11 +141,6 @@ final class AiPanel
             $saved = true;
         }
 
-        if ($act === 't' && $known) {
-            AI::setThink($prov, $p[3] ?? '');
-            $saved = true;
-        }
-
         if ($known && $act === 'p') {
             $page = (int) ($p[3] ?? 0);
         } elseif ($known && $act === 'set') {
@@ -215,9 +161,7 @@ final class AiPanel
             }
         }
 
-        if ($act === 'think' || $act === 't') {
-            $tg->editMessage($chatId, $msgId, self::thinkText(), self::thinkKeyboard());
-        } elseif ($known && ($act === 'p' || $act === 'set')) {
+        if ($known && ($act === 'p' || $act === 'set')) {
             $tg->editMessage($chatId, $msgId, self::providerText($prov, $page), self::providerKeyboard($prov, $page));
         } else {
             $tg->editMessage($chatId, $msgId, self::text(), self::keyboard());

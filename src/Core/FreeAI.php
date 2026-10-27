@@ -12,6 +12,7 @@ final class FreeAI
             'openai/gpt-oss-120b',
             'openai/gpt-oss-20b',
             'qwen/qwen3.8-27b',
+            'allam-2-7b',
         ],
     ];
     private const VISION = '/scout|maverick|vision|llava|\bvl\b|qwen3\.\d/i';
@@ -290,20 +291,12 @@ final class FreeAI
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
         $wants    = $prov === 'groq' && !empty($opt['search']) && AI::searchOn();
         $search   = $wants && preg_match('/gpt-oss/i', $model) === 1;
-        $tav      = $wants && !$search && WebSearch::available();
-        $orig     = $payload['messages'];
         if ($search) {
             $payload['tools'] = [['type' => 'browser_search']];
-        } elseif ($tav) {
-            $payload['tools'] = [WebSearch::openaiTool()];
         }
-        $effort = self::effort($prov, $model, $opt);
-        if ($effort !== null) {
-            $payload['reasoning_effort'] = $effort;
-        }
-        AI::$sources = [];
+        $orig     = $payload['messages'];
         $rounds   = 0;
-        $cap      = $prov === 'groq' ? (($search || $tav) ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
+        $cap      = $prov === 'groq' ? ($search ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
         $url      = self::PROVIDERS[$prov]['url'] . '/chat/completions';
         $n        = count($keys);
         $start    = random_int(0, $n - 1);
@@ -323,30 +316,12 @@ final class FreeAI
             AI::noteKey($prov, $keys[$idx], (int) $r['code']);
             if ($r['code'] === 200 && $r['data'] !== null) {
                 $msg = $r['data']['choices'][0]['message'] ?? [];
-                $calls = $tav ? array_values(array_filter((array) ($msg['tool_calls'] ?? []), 'is_array')) : [];
-                if ($calls && $rounds < WebSearch::MAX_ROUNDS) {
-                    $rounds++;
-                    $payload['messages'][] = ['role' => 'assistant', 'content' => $msg['content'] ?? null, 'tool_calls' => $calls];
-                    foreach ($calls as $ci => $c) {
-                        $args = json_decode((string) ($c['function']['arguments'] ?? ''), true);
-                        $q    = is_array($args) ? (string) ($args['query'] ?? '') : '';
-                        $payload['messages'][] = [
-                            'role'         => 'tool',
-                            'tool_call_id' => (string) ($c['id'] ?? ''),
-                            'content'      => $ci < 2 ? WebSearch::run($q, $deadline) : 'Skipped: too many searches at once.',
-                        ];
-                    }
-                    if ($rounds >= WebSearch::MAX_ROUNDS) {
-                        $payload['tool_choice'] = 'none';
-                    }
-                    $i--;
-                    continue;
-                }
                 $text = self::extract($r['data']);
                 if ($text === null) {
                     logWarn('ai', "{$route}: empty reply");
                     return ['text' => null, 'kind' => 'empty', 'seen' => []];
                 }
+                AI::$sources = [];
                 foreach ((array) ($msg['executed_tools'] ?? []) as $et) {
                     foreach ((array) ($et['search_results']['results'] ?? []) as $sr) {
                         if (!empty($sr['url'])) {
@@ -359,18 +334,10 @@ final class FreeAI
             }
 
             logWarn('ai', "{$route} key{$idx} HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $r['raw']), 0, 160));
-            if (($search || $tav) && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
-                unset($payload['tools'], $payload['tool_choice']);
+            if ($search && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
+                unset($payload['tools']);
                 $payload['messages'] = $orig;
                 $search              = false;
-                $tav                 = false;
-                $rounds              = 0;
-                AI::$sources         = [];
-                $i--;
-                continue;
-            }
-            if ($r['code'] === 400 && isset($payload['reasoning_effort']) && preg_match('/reasoning|effort/i', (string) $r['raw']) === 1) {
-                unset($payload['reasoning_effort']);
                 $i--;
                 continue;
             }
@@ -386,14 +353,6 @@ final class FreeAI
             }
         }
         return ['text' => null, 'kind' => 'failed', 'seen' => $seen];
-    }
-
-    private static function effort(string $prov, string $model, array $opt): ?string
-    {
-        if ($prov !== 'groq' || ($opt['section'] ?? '') !== 'chat') {
-            return null;
-        }
-        return AI::fitLevel('groq', $model, AI::thinkLevel('groq'));
     }
 
     private static function streamOnce(string $url, array $payload, string $key, int $timeout, callable $emit): array

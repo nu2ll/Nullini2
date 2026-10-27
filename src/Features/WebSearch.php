@@ -36,11 +36,6 @@ final class WebSearch
         ];
     }
 
-    public static function openaiTool(): array
-    {
-        return ['type' => 'function', 'function' => self::declaration()];
-    }
-
     /** نتیجه‌ی سرچ به‌صورت متن برای برگردوندن به مدل */
     public static function run(string $q, float $deadline): string
     {
