@@ -7,7 +7,7 @@
  */
 final class WebSearch
 {
-    public const MAX_ROUNDS = 1;
+    public const MAX_ROUNDS = 10;
 
     private const URL = 'https://api.tavily.com/search';
 
@@ -26,10 +26,11 @@ final class WebSearch
     {
         return [
             'name'        => 'web_search',
+            'description' => 'Search the web and get a short summary plus up to 10 results (title, URL, snippet). Use it whenever you judge that fresh or verified information from the internet would help you answer better. Pass one short, specific query. Base your answer on the results, and if they are empty or unclear, say so.',
             'parameters'  => [
                 'type'       => 'object',
                 'properties' => [
-                    'query' => ['type' => 'string', 'description' => 'Short, specific search query'],
+                    'query' => ['type' => 'string'],
                 ],
                 'required'   => ['query'],
             ],
@@ -39,11 +40,11 @@ final class WebSearch
     /** نتیجه‌ی سرچ به‌صورت متن برای برگردوندن به مدل */
     public static function run(string $q, float $deadline): string
     {
-        $q = trim(mb_substr($q, 0, 300));
+        $q = trim(mb_substr($q, 0, 200));
         if ($q === '') {
             return 'Empty query.';
         }
-        $data = Store::remember('cache', 'tav_' . md5(mb_strtolower($q)), 1800, static fn() => self::fetch($q, $deadline));
+        $data = self::fetch($q, $deadline);
         if (!is_array($data) || empty($data['results'])) {
             return 'Web search returned nothing or is unavailable right now. Answer from what you know and say you could not verify it.';
         }
@@ -52,12 +53,12 @@ final class WebSearch
         if (!empty($data['answer'])) {
             $out .= 'Summary: ' . $data['answer'] . "\n\n";
         }
-        foreach (array_slice((array) $data['results'], 0, 5) as $i => $r) {
+        foreach (array_slice((array) $data['results'], 0, 10) as $i => $r) {
             $url = (string) ($r['url'] ?? '');
             if ($url !== '') {
                 AI::$sources[] = ['t' => (string) ($r['title'] ?? ''), 'u' => $url];
             }
-            $out .= ($i + 1) . '. ' . ($r['title'] ?? '') . ' (' . $url . ")\n" . mb_substr((string) ($r['content'] ?? ''), 0, 500) . "\n\n";
+            $out .= ($i + 1) . '. ' . ($r['title'] ?? '') . ' (' . $url . ")\n" . mb_substr((string) ($r['content'] ?? ''), 0, 1000) . "\n\n";
         }
         return trim($out);
     }
@@ -79,7 +80,7 @@ final class WebSearch
             $r   = Http::postJson(self::URL, [
                 'query'          => $q,
                 'search_depth'   => 'basic',
-                'max_results'    => 5,
+                'max_results'    => 10,
                 'include_answer' => true,
             ], ['Authorization: Bearer ' . $key], (int) max(3, min($left, 10)));
 
