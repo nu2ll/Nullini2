@@ -37,14 +37,15 @@ final class GalleryDl
         return $bin = ($found !== '' ? $found : null);
     }
 
-    public static function images(string $url): array
+    public static function images(string $url, int $depth = 0): array
     {
         $bin = self::bin();
         if ($bin === null) {
             logWarn('photo', 'gallery-dl is not installed');
             return [];
         }
-        $args = [$bin, '--config-ignore', '-q', '-j', '-o', 'timeout=15'];
+        $url  = self::resolve($url);
+        $args = [$bin, '--config-ignore', '-j', '-o', 'timeout=15'];
         if (($jar = Downloader::cookiesFile()) !== null) {
             $args[] = '--cookies';
             $args[] = $jar;
@@ -58,11 +59,38 @@ final class GalleryDl
         $res  = Downloader::exec($args, 45);
         $sets = self::parse($res['out']);
         logInfo('photo', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ': exit=' . $res['code'] . ' sets=' . count($sets));
-        if ($sets === [] && $res['code'] !== 0) {
-            $lines = array_filter(array_map('trim', explode("\n", $res['err'])));
-            logWarn('photo', 'gallery-dl: ' . (string) end($lines));
+        if ($sets === [] && $depth < 2 && ($next = self::queued($res['out'])) !== null && $next !== $url) {
+            logInfo('photo', 'gallery-dl queued -> ' . (string) parse_url($next, PHP_URL_HOST));
+            return self::images($next, $depth + 1);
+        }
+        if ($sets === []) {
+            logWarn('photo', 'gallery-dl empty: out=' . substr((string) preg_replace('/\s+/', ' ', $res['out']), 0, 300) . ' err=' . substr(trim($res['err']), -300));
         }
         return $sets;
+    }
+
+    public static function queued(string $json): ?string
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            if (is_array($row) && ($row[0] ?? null) === 6 && preg_match('#^https?://#', (string) ($row[1] ?? ''))) {
+                return (string) $row[1];
+            }
+        }
+        return null;
+    }
+
+    private static function resolve(string $url): string
+    {
+        if (strtolower((string) parse_url($url, PHP_URL_HOST)) !== 'pin.it') {
+            return $url;
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 5, CURLOPT_TIMEOUT => 12, CURLOPT_USERAGENT => Scrape::UA, CURLOPT_NOBODY => true]);
+        curl_exec($ch);
+        $end = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+        curl_close($ch);
+        return preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $end, $m) ? 'https://www.pinterest.com/pin/' . $m[1] . '/' : $url;
     }
 
     public static function parse(string $json): array

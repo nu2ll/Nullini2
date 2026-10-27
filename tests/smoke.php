@@ -281,6 +281,8 @@ check('gdl video left to ytdlp', GalleryDl::parse((string) json_encode([[3, 'htt
 check('gdl ytdl prefix', GalleryDl::parse((string) json_encode([[3, 'ytdl:https://x.com/a', []]])), []);
 check('gdl ext from url', GalleryDl::parse((string) json_encode([[3, 'https://i.pinimg.com/originals/a/1.jpg', []]])), [['https://i.pinimg.com/originals/a/1.jpg']]);
 check('gdl garbage', GalleryDl::parse('not json'), []);
+check('gdl queued', GalleryDl::queued((string) json_encode([[6, 'https://www.pinterest.com/pin/123/', []]])), 'https://www.pinterest.com/pin/123/');
+check('gdl no queue', GalleryDl::queued('[]'), null);
 check('gdl supports', [GalleryDl::supports('instagram'), GalleryDl::supports('pinterest'), GalleryDl::supports('reddit')], [true, true, false]);
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');
