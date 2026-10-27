@@ -25,9 +25,10 @@ final class Http
         $body  = curl_exec($ch);
         $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
+        $final = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
         curl_close($ch);
 
-        return ['code' => $code, 'body' => $body === false ? null : (string) $body, 'error' => $error];
+        return ['code' => $code, 'body' => $body === false ? null : (string) $body, 'error' => $error, 'url' => $final];
     }
 
     public static function getJson(string $url, array $headers = [], int $timeout = 12): ?array

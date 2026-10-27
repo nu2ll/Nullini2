@@ -142,13 +142,24 @@ final class Photos
 
     private static function pinterest(string $url): array
     {
-        $r    = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
-        $html = (string) ($r['body'] ?? '');
-        $car  = self::pinImages($html, $url);
+        $r     = Http::request('GET', $url, ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
+        $html  = (string) ($r['body'] ?? '');
+        $final = (string) ($r['url'] ?? '');
+        $id    = self::pinId($final) ?? self::pinId($url);
+        if ($id === null && preg_match('#rel="canonical"[^>]*href="([^"]+)"#i', $html, $cm)) {
+            $id = self::pinId($cm[1]);
+        }
+        if ($id !== null) {
+            $sets = self::pinApi($id);
+            if ($sets) {
+                return $sets;
+            }
+        }
+        $car = self::pinImages($html, $final !== '' ? $final : $url);
         if (count($car) > 1) {
             return $car;
         }
-        $og   = self::og($html);
+        $og = self::og($html);
         if ($og === '' && preg_match('#https://i\.pinimg\.com/originals/[\w/]+\.(?:jpe?g|png|gif|webp)#i', $html, $m)) {
             $og = $m[0];
         }
@@ -157,6 +168,65 @@ final class Photos
         }
         $orig = preg_replace('#i\.pinimg\.com/\d+x(?:\d+)?/#', 'i.pinimg.com/originals/', $og) ?? $og;
         return [self::unique([$orig, $og])];
+    }
+
+    public static function pinId(string $url): ?string
+    {
+        return preg_match('#/pin/(?:[\w-]*?--)?(\d{6,})#', $url, $m) ? $m[1] : null;
+    }
+
+    private static function pinApi(string $id): array
+    {
+        $data = json_encode(['options' => ['id' => $id, 'field_set_key' => 'detailed', 'noCache' => true], 'context' => new \stdClass()]);
+        $j    = Http::getJson('https://www.pinterest.com/resource/PinResource/get/?source_url=' . rawurlencode("/pin/{$id}/") . '&data=' . rawurlencode((string) $data), [
+            'User-Agent: ' . self::UA,
+            'Accept-Language: en-US,en;q=0.9',
+            'X-Requested-With: XMLHttpRequest',
+            'X-Pinterest-AppState: active',
+            'X-Pinterest-Source-Url: /pin/' . $id . '/',
+        ], 15);
+        $pin = $j['resource_response']['data'] ?? null;
+        return is_array($pin) ? self::pinSlots($pin) : [];
+    }
+
+    public static function pinSlots(array $pin): array
+    {
+        $sets = [];
+        foreach ((array) ($pin['carousel_data']['carousel_slots'] ?? []) as $slot) {
+            if ($c = self::imageCands((array) ($slot['images'] ?? []))) {
+                $sets[] = $c;
+            }
+        }
+        if (!$sets) {
+            foreach ((array) ($pin['story_pin_data']['pages'] ?? []) as $page) {
+                foreach ((array) ($page['blocks'] ?? []) as $b) {
+                    if ($c = self::imageCands((array) ($b['image']['images'] ?? []))) {
+                        $sets[] = $c;
+                    }
+                }
+            }
+        }
+        if (!$sets && ($c = self::imageCands((array) ($pin['images'] ?? [])))) {
+            $sets[] = $c;
+        }
+        return array_slice($sets, 0, self::MAX);
+    }
+
+    private static function imageCands(array $imgs): array
+    {
+        $c = [];
+        foreach (['originals', 'orig'] as $k) {
+            if (!empty($imgs[$k]['url'])) {
+                $c[] = (string) $imgs[$k]['url'];
+            }
+        }
+        uasort($imgs, static fn($a, $b) => (int) ($b['width'] ?? 0) <=> (int) ($a['width'] ?? 0));
+        foreach ($imgs as $img) {
+            if (is_array($img) && !empty($img['url'])) {
+                $c[] = (string) $img['url'];
+            }
+        }
+        return self::unique($c);
     }
 
     public static function pinImages(string $html, string $url = ''): array
@@ -168,7 +238,7 @@ final class Photos
         if (!is_array($j)) {
             return [];
         }
-        $pinId = preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm) ? $pm[1] : '';
+        $pinId = self::pinId($url) ?? '';
         $found = null;
         $walk  = static function ($node) use (&$walk, &$found, $pinId): void {
             if ($found !== null || !is_array($node)) {
@@ -176,7 +246,7 @@ final class Photos
             }
             if (isset($node['carousel_data']['carousel_slots']) && is_array($node['carousel_data']['carousel_slots'])
                 && ($pinId === '' || (string) ($node['id'] ?? '') === $pinId)) {
-                $found = $node['carousel_data']['carousel_slots'];
+                $found = $node;
                 return;
             }
             foreach ($node as $v) {
@@ -184,27 +254,7 @@ final class Photos
             }
         };
         $walk($j);
-        $out = [];
-        foreach ((array) $found as $slot) {
-            $imgs = (array) ($slot['images'] ?? []);
-            $c    = [];
-            foreach (['originals', 'orig'] as $k) {
-                if (!empty($imgs[$k]['url'])) {
-                    $c[] = (string) $imgs[$k]['url'];
-                }
-            }
-            uasort($imgs, static fn($a, $b) => (int) ($b['width'] ?? 0) <=> (int) ($a['width'] ?? 0));
-            foreach ($imgs as $img) {
-                if (!empty($img['url'])) {
-                    $c[] = (string) $img['url'];
-                }
-            }
-            $c = self::unique($c);
-            if ($c) {
-                $out[] = $c;
-            }
-        }
-        return array_slice($out, 0, self::MAX);
+        return $found === null ? [] : self::pinSlots($found);
     }
 
     private static function twitter(string $url): array
