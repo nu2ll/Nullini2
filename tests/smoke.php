@@ -232,8 +232,7 @@ check('dl spotify', Downloader::match('https://open.spotify.com/intl-fa/track/4u
 check('dl snapchat', Downloader::match('https://www.snapchat.com/spotlight/W7_EDlXWTBiXAEEniNoMPwAAYYWtidGhudGZpAX1TKn0JAX1TKnXJAAAAAA')['site'] ?? '', 'snapchat');
 check('dl aparat gone', Downloader::match('https://www.aparat.com/v/abc'), null);
 check('dl find in text', Downloader::find('اینو برام دانلود کن https://youtu.be/dQw4w9WgXcQ لطفا')['site'] ?? '', 'youtube');
-check('photo insta code', Photos::igCode('https://www.instagram.com/p/C1a2B3c4D5e/?img_index=1'), 'C1a2B3c4D5e');
-check('photo unescape', Photos::unescape('https:\\/\\/x.com\\/a.jpg?b=1\\u0026c=2'), 'https://x.com/a.jpg?b=1&c=2');
+check('photo unescape', Scrape::unescape('https:\\/\\/x.com\\/a.jpg?b=1\\u0026c=2'), 'https://x.com/a.jpg?b=1&c=2');
 check('intent download', Intent::parse('[[download | https://youtu.be/x]]'), ['download', 'https://youtu.be/x']);
 check('help page 1', Ui::helpPage('ai'), 1);
 check('help page 2', Ui::helpPage('group'), 2);
@@ -276,12 +275,13 @@ check('dl clock', Downloader::clock(3725), '1:02:05');
 check('dl explain bot', str_contains(Downloader::explain("ERROR: Sign in to confirm you're not a bot"), 'ربات'), true);
 check('dl explain size', str_contains(Downloader::explain('File is larger than max-filesize'), Downloader::limitText()), true);
 
-$relay = '<script data-relay-response="true" type="application/json">' . json_encode(['requestParameters' => ['name' => 'CloseupDetailQuery'], 'response' => ['data' => ['v3GetPinQuery' => ['data' => ['carouselData' => ['carouselSlots' => [
-    ['imageSpec_orig' => ['url' => 'https://i.pinimg.com/originals/aa/bb/1.jpg'], 'imageSpec_236x' => ['url' => 'https://i.pinimg.com/236x/aa/bb/1.jpg']],
-    ['imageSpec_orig' => ['url' => 'https://i.pinimg.com/originals/aa/bb/2.jpg']],
-]]]]]]]) . '</script>';
-check('pin relay carousel', count(Photos::pinRelaySets(Photos::pinRelay($relay) ?? [])), 2);
-check('pin relay first original', Photos::pinRelaySets(Photos::pinRelay($relay) ?? [])[0][0], 'https://i.pinimg.com/originals/aa/bb/1.jpg');
+$gd = json_encode([[2, ['category' => 'instagram']], [3, 'https://cdn.x/1.jpg?a=1', ['extension' => 'jpg']], [3, 'https://cdn.x/2.png', ['extension' => 'png']], [3, 'https://cdn.x/1.jpg?a=2', ['extension' => 'jpg']]]);
+check('gdl photos', GalleryDl::parse((string) $gd), [['https://cdn.x/1.jpg?a=1'], ['https://cdn.x/2.png']]);
+check('gdl video left to ytdlp', GalleryDl::parse((string) json_encode([[3, 'https://cdn.x/1.jpg', ['extension' => 'jpg']], [3, 'https://cdn.x/v.mp4', ['extension' => 'mp4']]])), []);
+check('gdl ytdl prefix', GalleryDl::parse((string) json_encode([[3, 'ytdl:https://x.com/a', []]])), []);
+check('gdl ext from url', GalleryDl::parse((string) json_encode([[3, 'https://i.pinimg.com/originals/a/1.jpg', []]])), [['https://i.pinimg.com/originals/a/1.jpg']]);
+check('gdl garbage', GalleryDl::parse('not json'), []);
+check('gdl supports', [GalleryDl::supports('instagram'), GalleryDl::supports('pinterest'), GalleryDl::supports('reddit')], [true, true, false]);
 check('entry kind photo', Downloader::entryKind(['ext' => 'jpg']), 'p');
 check('entry kind video', Downloader::entryKind(['ext' => 'mp4']), 'v');
 check('entry kind formats', Downloader::entryKind(['formats' => [['vcodec' => 'h264']]]), 'v');

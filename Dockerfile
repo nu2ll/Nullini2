@@ -7,12 +7,12 @@ RUN apt-get update \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip curl unzip ca-certificates \
- && python3 -m pip install -U --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" telethon \
+ && python3 -m pip install -U --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" gallery-dl telethon \
  && (python3 -m pip install --no-cache-dir --break-system-packages --only-binary=:all: cryptg || true) \
  && ARCH="$(uname -m)" && case "$ARCH" in aarch64|arm64) D=aarch64 ;; *) D=x86_64 ;; esac \
  && curl -fsSL -o /tmp/deno.zip "https://github.com/denoland/deno/releases/latest/download/deno-${D}-unknown-linux-gnu.zip" \
  && unzip -o -q /tmp/deno.zip -d /usr/local/bin && chmod +x /usr/local/bin/deno && rm -f /tmp/deno.zip \
- && yt-dlp --version && deno --version | head -1 && ffmpeg -version | head -1 \
+ && yt-dlp --version && gallery-dl --version | head -1 && deno --version | head -1 && ffmpeg -version | head -1 \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
 RUN { \

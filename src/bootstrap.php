@@ -10,7 +10,7 @@ spl_autoload_register(static function (string $class): void {
     static $map = null;
     if ($map === null) {
         $map = [];
-        foreach (['', '/Core', '/Features', '/Games', '/Handlers'] as $sub) {
+        foreach (['', '/Core', '/Features', '/Games', '/Handlers', '/Sites'] as $sub) {
             foreach (glob(__DIR__ . $sub . '/*.php') ?: [] as $file) {
                 $map[basename($file, '.php')] = $file;
             }

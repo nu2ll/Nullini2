@@ -93,142 +93,15 @@ final class Photos
         return false;
     }
 
-    public static function igCode(string $url): ?string
-    {
-        return preg_match('#instagram\.com/(?:[\w.]+/)?(?:p|reel|reels|tv)/([\w-]{5,})#i', $url, $m) ? $m[1] : null;
-    }
-
-    public static function unescape(string $s): string
-    {
-        $s = preg_replace('#\\\\+u0026#', '&', $s) ?? $s;
-        $s = preg_replace('#\\\\+/#', '/', $s) ?? $s;
-        return html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    }
-
     private static function find(string $site, string $url): array
     {
         return match ($site) {
-            'instagram' => self::instagram($url),
-            'pinterest' => self::pinterest($url),
+            'instagram' => GalleryDl::images($url),
+            'pinterest' => GalleryDl::images($url),
             'twitter'   => self::twitter($url),
             'reddit'    => self::reddit($url),
             default     => [],
         };
-    }
-
-    private static function instagram(string $url): array
-    {
-        $code = self::igCode($url);
-        if ($code === null) {
-            return [];
-        }
-        $r = Http::request('GET', "https://www.instagram.com/p/{$code}/embed/captioned/", ['timeout' => 15, 'headers' => ['User-Agent: ' . self::UA, 'Accept-Language: en-US,en;q=0.9']]);
-        $html = (string) ($r['body'] ?? '');
-        $out  = [];
-        logInfo('photo', "ig embed {$code}: http={$r['code']} len=" . strlen($html) . ' display_url=' . substr_count($html, 'display_url') . ' video=' . (preg_match('#is_video|video_url#', $html) ? '1' : '0') . ' sidecar=' . (str_contains($html, 'edge_sidecar_to_children') ? '1' : '0'));
-        if (preg_match_all('#display_url[\\\\"\s:]+(https?:(?:[^"\\\\]|\\\\+/|\\\\+u0026)+)#', $html, $m)) {
-            foreach ($m[1] as $u) {
-                $out[] = self::unescape($u);
-            }
-        }
-        $out = self::unique($out);
-        if (count($out) <= 1 && preg_match('#is_video[\\\\"\s:]+true|video_url[\\\\"\s:]+https#', $html)) {
-            return [];
-        }
-        if (!$out && preg_match('#class="EmbeddedMediaImage"[^>]*\ssrc="([^"]+)"#', $html, $m)) {
-            $out[] = self::unescape($m[1]);
-        }
-        if (!$out) {
-            $r = Http::request('GET', "https://www.instagram.com/p/{$code}/", ['timeout' => 12, 'headers' => ['User-Agent: facebookexternalhit/1.1']]);
-            if (($og = self::og((string) ($r['body'] ?? ''))) !== '') {
-                $out[] = $og;
-            }
-        }
-        return array_map(static fn($u) => [$u], self::unique($out));
-    }
-
-    private static function pinterest(string $url): array
-    {
-        if (preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pu)) {
-            $url = 'https://www.pinterest.com/pin/' . $pu[1] . '/';
-        }
-        $r = Http::request('GET', $url, ['timeout' => 15, 'headers' => [
-            'User-Agent: Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-            'Accept: application/json, text/javascript, */*; q=0.01',
-            'X-Requested-With: XMLHttpRequest',
-        ]]);
-        $pin  = self::pinRelay((string) ($r['body'] ?? ''));
-        $sets = $pin !== null ? self::pinRelaySets($pin) : [];
-        logInfo('photo', 'pin relay: ' . ($pin !== null ? 'yes' : 'no') . ' http=' . $r['code'] . ' sets=' . count($sets));
-        return $sets;
-    }
-
-    public static function pinRelay(string $html): ?array
-    {
-        if (!preg_match_all('#<script[^>]*data-relay-response="true"[^>]*>(.*?)</script>#s', $html, $m)) {
-            return null;
-        }
-        foreach ($m[1] as $raw) {
-            $j   = json_decode(trim($raw), true);
-            $pin = is_array($j) && ($j['requestParameters']['name'] ?? '') === 'CloseupDetailQuery'
-                ? ($j['response']['data']['v3GetPinQuery']['data'] ?? null) : null;
-            if (is_array($pin)) {
-                return $pin;
-            }
-        }
-        return null;
-    }
-
-    private static function pinUrls(mixed $node): array
-    {
-        $found = [];
-        $walk  = static function ($n) use (&$walk, &$found): void {
-            if (is_array($n)) {
-                foreach ($n as $v) {
-                    $walk($v);
-                }
-            } elseif (is_string($n) && preg_match('#^https://i\.pinimg\.com/\S+\.(?:jpe?g|png|webp|gif)(?:\?\S*)?$#i', $n)) {
-                $found[] = $n;
-            }
-        };
-        $walk($node);
-        $rank = static function (string $u): int {
-            if (str_contains($u, '/originals/')) {
-                return 100000;
-            }
-            return preg_match('#i\.pinimg\.com/(\d+)x#', $u, $mm) ? (int) $mm[1] : 0;
-        };
-        usort($found, static fn($a, $b): int => $rank($b) <=> $rank($a));
-        return self::unique($found);
-    }
-
-    public static function pinRelaySets(array $pin): array
-    {
-        if (str_contains((string) json_encode($pin), 'videoDataV2')) {
-            return [];
-        }
-        $out   = [];
-        $slots = $pin['carouselData']['carouselSlots'] ?? $pin['carousel_data']['carousel_slots'] ?? null;
-        foreach (is_array($slots) ? $slots : [] as $slot) {
-            if (($c = self::pinUrls($slot)) !== []) {
-                $out[] = $c;
-            }
-        }
-        if (count($out) > 1) {
-            return array_slice($out, 0, self::MAX);
-        }
-        $out   = [];
-        $pages = $pin['storyPinData']['pages'] ?? null;
-        foreach (is_array($pages) ? $pages : [] as $page) {
-            if (($c = self::pinUrls($page['blocks'][0] ?? $page)) !== []) {
-                $out[] = $c;
-            }
-        }
-        if (count($out) > 1) {
-            return array_slice($out, 0, self::MAX);
-        }
-        $one = self::pinUrls([$pin['imageSpec_orig'] ?? null, $pin['images'] ?? null, $pin['imageLargeUrl'] ?? null]);
-        return $one !== [] ? [$one] : [];
     }
 
     private static function twitter(string $url): array
@@ -297,27 +170,9 @@ final class Photos
         return $prev !== '' && empty($p['is_video']) ? [[$prev]] : [];
     }
 
-    private static function og(string $html): string
-    {
-        if (preg_match('#<meta[^>]+(?:property|name)=["\']og:image["\'][^>]*content=["\']([^"\']+)#i', $html, $m)
-            || preg_match('#<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']og:image["\']#i', $html, $m)) {
-            return self::unescape($m[1]);
-        }
-        return '';
-    }
-
     private static function unique(array $urls): array
     {
-        $seen = [];
-        $out  = [];
-        foreach ($urls as $u) {
-            $k = (string) strtok((string) $u, '?');
-            if ($u !== '' && preg_match('#^https?://#', $u) && !isset($seen[$k])) {
-                $seen[$k] = true;
-                $out[]    = $u;
-            }
-        }
-        return $out;
+        return Scrape::unique($urls);
     }
 
     private static function fetch(string $url): ?string

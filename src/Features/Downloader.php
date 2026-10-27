@@ -886,18 +886,29 @@ final class Downloader
         return ['-f', $sel, '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4', '--remux-video', 'mp4'];
     }
 
+    public static function cookiesFile(): ?string
+    {
+        $src = NULLINI_ROOT . '/cookies.txt';
+        $jar = is_file($src) && filesize($src) > 0 ? rtrim((string) file_get_contents($src)) . "\n" : '';
+        if ($jar === '') {
+            return null;
+        }
+        $tmp = self::TMP . '/cookies-' . getmypid() . '.txt';
+        @mkdir(self::TMP, 0775, true);
+        return @file_put_contents($tmp, $jar) !== false ? $tmp : null;
+    }
+
+    public static function exec(array $args, int $timeout): array
+    {
+        return self::run($args, $timeout);
+    }
+
     private static function commonArgs(): array
     {
         $args = ['--ignore-config', '--no-color'];
-        $src  = NULLINI_ROOT . '/cookies.txt';
-        $jar  = is_file($src) && filesize($src) > 0 ? rtrim((string) file_get_contents($src)) . "\n" : '';
-        if ($jar !== '') {
-            $tmp = self::TMP . '/cookies-' . getmypid() . '.txt';
-            @mkdir(self::TMP, 0775, true);
-            if (@file_put_contents($tmp, $jar) !== false) {
-                $args[] = '--cookies';
-                $args[] = $tmp;
-            }
+        if (($jar = self::cookiesFile()) !== null) {
+            $args[] = '--cookies';
+            $args[] = $jar;
         }
         $proxy = (string) env('DL_PROXY', '');
         if ($proxy !== '') {
