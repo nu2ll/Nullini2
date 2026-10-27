@@ -109,6 +109,9 @@ final class Downloader
                 if ($key === 'pinterest' && preg_match('#/pin/(?:[\w-]*?--)?(\d+)#', $url, $pm)) {
                     $url = 'https://www.pinterest.com/pin/' . $pm[1] . '/';
                 }
+                if ($key === 'instagram') {
+                    $url = (string) preg_replace('/[?#].*$/', '', $url);
+                }
                 return ['url' => $url, 'site' => $key, 'name' => $name];
             }
         }
