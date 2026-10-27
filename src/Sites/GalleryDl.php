@@ -118,7 +118,9 @@ final class GalleryDl
         $out  = [];
         foreach (is_array($data) ? $data : [] as $row) {
             if (is_array($row) && ($row[0] ?? null) === 3 && is_array($row[2] ?? null)) {
-                self::leaves($row[2], '', $out);
+                $meta = $row[2];
+                unset($meta['board'], $meta['pinner'], $meta['user'], $meta['owner'], $meta['creator']);
+                self::leaves($meta, '', $out);
                 break;
             }
         }

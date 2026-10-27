@@ -98,11 +98,36 @@ final class Photos
     {
         return match ($site) {
             'instagram' => GalleryDl::images($url),
-            'pinterest' => GalleryDl::images($url),
+            'pinterest' => self::pinterest($url),
             'twitter'   => self::twitter($url),
             'reddit'    => self::reddit($url),
             default     => [],
         };
+    }
+
+    private static function pinterest(string $url): array
+    {
+        $script = NULLINI_ROOT . '/bin/pin.py';
+        $data   = null;
+        if (is_file($script)) {
+            $res  = Downloader::exec(['python3', $script, $url], 30);
+            $data = json_decode(trim($res['out']), true);
+        }
+        $ok   = is_array($data) && !empty($data['ok']);
+        $type = $ok ? strtolower((string) ($data['type'] ?? '')) : '';
+        $gif  = $ok ? (string) ($data['gif'] ?? '') : '';
+        $imgs = $ok ? array_values(array_filter((array) ($data['images'] ?? []), static fn($u): bool => is_string($u) && preg_match('#^https?://#', $u) === 1)) : [];
+        logInfo('photo', 'pin lib: ok=' . (int) $ok . ' type=' . ($type !== '' ? $type : '-') . ' gif=' . ($gif !== '' ? '1' : '0') . ' images=' . count($imgs) . (is_array($data) && isset($data['error']) ? ' err=' . $data['error'] : ''));
+        if ($gif !== '' && preg_match('#^https?://#', $gif)) {
+            return [[$gif]];
+        }
+        if ($ok && $type === 'video') {
+            return [];
+        }
+        if ($imgs !== []) {
+            return [$imgs];
+        }
+        return GalleryDl::images($url);
     }
 
     private static function twitter(string $url): array

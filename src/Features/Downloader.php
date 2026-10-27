@@ -201,6 +201,9 @@ final class Downloader
         if (!App::isAdmin($uid) && self::usedToday($uid) >= self::DAILY) {
             return '✋ امروز سهمیه‌ی دانلودت (' . fa(self::DAILY) . ' تا) تموم شده؛' . "\n" . 'فردا دوباره بیا 🙂';
         }
+        if ($link['site'] === 'instagram' && preg_match('#instagram\.com/(stories/|s/)#i', $link['url'])) {
+            return "📸 استوری اینستا رو دانلود نمی‌کنم؛\nپست و ریلز رو بفرست 🙂";
+        }
         return null;
     }
 
