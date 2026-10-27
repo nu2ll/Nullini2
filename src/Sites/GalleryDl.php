@@ -6,7 +6,7 @@ final class GalleryDl
 
     private const SITES = ['instagram', 'pinterest'];
     private const VIDEO = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'm3u8', 'mpd'];
-    private const IMAGE = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'];
+    private const IMAGE = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic'];
 
     public static function supports(string $site): bool
     {

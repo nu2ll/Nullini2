@@ -186,12 +186,53 @@ final class Photos
 
     private static function fetch(string $url): ?string
     {
-        $r = Http::request('GET', $url, ['timeout' => 25, 'headers' => ['User-Agent: ' . self::UA, 'Accept: image/avif,image/webp,image/*,*/*']]);
-        $b = $r['body'];
-        if ($b === null || $r['code'] >= 400 || strlen($b) < 800 || strlen($b) > 10 * 1048576 || @getimagesizefromstring($b) === false) {
+        $r   = Http::request('GET', $url, ['timeout' => 40, 'headers' => ['User-Agent: ' . self::UA, 'Accept: image/avif,image/webp,image/*,*/*']]);
+        $b   = $r['body'];
+        $gif = $b !== null && str_starts_with($b, 'GIF');
+        if (str_ends_with(strtolower((string) parse_url($url, PHP_URL_PATH)), '.gif')) {
+            logInfo('photo', 'gif fetch code=' . $r['code'] . ' bytes=' . strlen((string) $b) . ' gif=' . ($gif ? '1' : '0'));
+        }
+        if ($b === null || $r['code'] >= 400 || strlen($b) < 800 || strlen($b) > ($gif ? 30 : 10) * 1048576) {
             return null;
         }
-        return $b;
+        if (self::isHeic($b)) {
+            return self::heicToJpeg($b);
+        }
+        return @getimagesizefromstring($b) === false ? null : $b;
+    }
+
+    private static function isHeic(string $b): bool
+    {
+        return substr($b, 4, 4) === 'ftyp' && in_array(substr($b, 8, 4), ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'], true);
+    }
+
+    private static function heicToJpeg(string $b): ?string
+    {
+        $base = tempnam(sys_get_temp_dir(), 'nl_hc_');
+        if ($base === false) {
+            return null;
+        }
+        $in  = $base . '.heic';
+        $out = $base . '.jpg';
+        try {
+            if (!rename($base, $in) || file_put_contents($in, $b) === false) {
+                return null;
+            }
+            foreach (['timeout 30 heif-convert -q 92 ', 'timeout 30 ffmpeg -y -v error -i '] as $cmd) {
+                @unlink($out);
+                @exec($cmd . escapeshellarg($in) . ' ' . escapeshellarg($out) . ' 2>&1', $o, $rc);
+                $jpg = is_file($out) ? (string) file_get_contents($out) : '';
+                if ($jpg !== '' && @getimagesizefromstring($jpg) !== false) {
+                    return $jpg;
+                }
+            }
+            logWarn('photo', 'heic convert failed');
+            return null;
+        } finally {
+            @unlink($base);
+            @unlink($in);
+            @unlink($out);
+        }
     }
 
     private static function single(int|string $chat, array $cands, string $cap, int $replyTo): bool

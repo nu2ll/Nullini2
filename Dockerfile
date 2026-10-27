@@ -6,7 +6,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip curl unzip ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg libheif-examples python3 python3-pip curl unzip ca-certificates \
  && python3 -m pip install -U --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" gallery-dl telethon \
  && (python3 -m pip install --no-cache-dir --break-system-packages --only-binary=:all: cryptg || true) \
  && ARCH="$(uname -m)" && case "$ARCH" in aarch64|arm64) D=aarch64 ;; *) D=x86_64 ;; esac \
