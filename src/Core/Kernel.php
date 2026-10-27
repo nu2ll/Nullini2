@@ -31,6 +31,9 @@ final class Kernel
     {
         App::useBot((int) ($update['_bot'] ?? 0));
         try {
+            if (Ban::block($update)) {
+                return;
+            }
             if (isset($update['message'])) {
                 MessageHandler::handle($update['message']);
             } elseif (isset($update['inline_query'])) {

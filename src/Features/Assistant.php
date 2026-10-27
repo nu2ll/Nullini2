@@ -373,11 +373,12 @@ final class Assistant
         if ($file === null) {
             return;
         }
-        $tg->call('sendVoice', [
+        $vr = $tg->call('sendVoice', [
             'chat_id'          => $msg['chat']['id'],
             'voice'            => new CURLFile($file, 'audio/ogg', 'voice.ogg'),
             'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
         ], 120);
+        AI::markMsg($msg['chat']['id'], $vr['result']['message_id'] ?? 0);
         @unlink($file);
     }
 
@@ -387,17 +388,21 @@ final class Assistant
         foreach (AI::chunks($answer) as $part) {
             $r = $tg->reply($msg, AI::toHtml($part));
             if (empty($r['ok'])) {
-                $tg->call('sendMessage', [
+                $r = $tg->call('sendMessage', [
                     'chat_id'          => $msg['chat']['id'],
                     'text'             => mb_substr($part, 0, 4096),
                     'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
                 ]);
             }
+            AI::markMsg($msg['chat']['id'], $r['result']['message_id'] ?? 0);
         }
     }
 
     public static function handle(array $msg, string $question): void
     {
+        if (!Switches::on('ai')) {
+            return;
+        }
         $tg       = App::tg();
         $chatId   = (int) $msg['chat']['id'];
         $chatType = (string) $msg['chat']['type'];
@@ -511,6 +516,10 @@ final class Assistant
         }
 
         if (!empty($res['image']) || !empty($res['image_partial'])) {
+            if (!Switches::on('image')) {
+                $live?->discard();
+                return;
+            }
             Users::hit('image');
             $caption = null;
             if (!empty($res['image_partial'])) {
@@ -532,6 +541,10 @@ final class Assistant
         if (!$live || !$live->finish($answer)) {
             self::typing($chatId, $answer);
             self::send($msg, $answer);
+        } else {
+            foreach ($live->ids() as $mid) {
+                AI::markMsg($chatId, $mid);
+            }
         }
 
         if ($res['answer'] !== null && !$service) {

@@ -25,6 +25,9 @@ final class GuestHandler
         }
 
         $link = $q !== '' ? Downloader::match($q) : ($rt !== '' ? Downloader::match($rt) : null);
+        if (($link !== null && !Switches::on('download')) || ($link === null && !Switches::on('ai'))) {
+            return;
+        }
         if ($link !== null) {
             $imid = self::send($qid, '🔎 دارم لینک ' . $link['name'] . ' رو بررسی می‌کنم...');
             if ($imid !== null) {

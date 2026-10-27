@@ -289,7 +289,7 @@ final class FreeAI
             'temperature' => $opt['temperature'] ?? 0.7,
         ];
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
-        $wants    = $prov === 'groq' && !empty($opt['search']);
+        $wants    = $prov === 'groq' && !empty($opt['search']) && AI::searchOn();
         $search   = $wants && preg_match('/gpt-oss/i', $model) === 1;
         if ($search) {
             $payload['tools'] = [['type' => 'browser_search']];
@@ -313,6 +313,7 @@ final class FreeAI
                 ? self::streamOnce($url, $payload, $keys[$idx], (int) max(5, min($left, 55)), $opt['stream'])
                 : Http::postJson($url, $payload, ['Authorization: Bearer ' . $keys[$idx]], (int) max(5, min($left, $cap)));
 
+            AI::noteKey($prov, $keys[$idx], (int) $r['code']);
             if ($r['code'] === 200 && $r['data'] !== null) {
                 $msg = $r['data']['choices'][0]['message'] ?? [];
                 $text = self::extract($r['data']);

@@ -42,7 +42,8 @@ final class AiPanel
     {
         $cur = AI::route();
         return "<b>🤖 پنل هوش مصنوعی</b>\n\n"
-            . "مدل فعال روی همه‌ی بخش‌ها:\n<b>" . bidi(h(self::label($cur))) . "</b>";
+            . "مدل فعال روی همه‌ی بخش‌ها:\n<b>" . bidi(h(self::label($cur))) . "</b>"
+            . "\n\n🔎 سرچ وب: <b>" . (AI::searchOn() ? 'روشن' : 'خاموش') . '</b>';
     }
 
     public static function keyboard(): array
@@ -53,6 +54,7 @@ final class AiPanel
             $on     = $cur === $id;
             $rows[] = [btn(($on ? '✅ ' : '') . $name . ' ▸', "ai:p:{$id}:0", $on ? 'success' : 'primary')];
         }
+        $rows[] = [btn(AI::searchOn() ? '🔎 سرچ: روشن ✅' : '🔎 سرچ: خاموش ⛔', 'ai:search', AI::searchOn() ? 'success' : null)];
         return ikb($rows);
     }
 
@@ -133,6 +135,11 @@ final class AiPanel
         $known = isset(self::providers()[$prov]);
         $page  = 0;
         $saved = false;
+
+        if ($act === 'search') {
+            AI::setSearch(!AI::searchOn());
+            $saved = true;
+        }
 
         if ($known && $act === 'p') {
             $page = (int) ($p[3] ?? 0);

@@ -129,7 +129,7 @@ final class ImageGen
         }
         $captions = ['🎨 بفرما، اینم عکست!', '🖼 اینم از این، امیدوارم خوشت بیاد!', '✨ تازه از زیر قلمم دراومده!'];
         $cap      = h($caption ?? $captions[array_rand($captions)]);
-        $sent = $tg->sendPhotoBytes($chatId, $bytes, $cap, $msg['message_id'] ?? null);
+        $sent = $tg->sendPhotoBytes($chatId, $bytes, $cap, $msg['message_id'] ?? null, true);
         self::clear($chatId, $live, $statusId);
         if (!$sent) {
             $tg->reply($msg, '😕 عکس ساخته شد ولی ارسالش به مشکل خورد؛' . "\n" . 'دوباره امتحان کن.');

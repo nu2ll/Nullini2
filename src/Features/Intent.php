@@ -47,6 +47,9 @@ final class Intent
         $tg      = App::tg();
         $chat    = $msg['chat']['id'];
         $private = ($msg['chat']['type'] ?? '') === 'private';
+        if (!Switches::on($name)) {
+            return true;
+        }
         Users::hit('intent:' . $name);
 
         if ($name === 'download') {

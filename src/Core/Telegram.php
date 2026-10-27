@@ -257,7 +257,7 @@ final class Telegram
         return $id;
     }
 
-    public function sendPhotoBytes(int|string $chatId, string $bytes, string $caption = '', ?int $replyTo = null): bool
+    public function sendPhotoBytes(int|string $chatId, string $bytes, string $caption = '', ?int $replyTo = null, bool $ai = false): bool
     {
         $info = @getimagesizefromstring($bytes);
         $mime = $info['mime'] ?? 'image/jpeg';
@@ -276,6 +276,9 @@ final class Telegram
             ], 90);
         } finally {
             @unlink($tmp);
+        }
+        if ($ai && !empty($r['ok'])) {
+            AI::markMsg($chatId, $r['result']['message_id'] ?? 0);
         }
         return !empty($r['ok']);
     }

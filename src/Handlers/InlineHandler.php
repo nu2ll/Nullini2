@@ -47,6 +47,11 @@ final class InlineHandler
             foreach ($words as $w) {
                 if (preg_match('/^' . preg_quote($w, '/') . '(?:\s+|$)(.*)$/isu', $query, $m)) {
                     $rest = trim($m[1]);
+                    $sw   = ['tr' => 'translate', 'funstat' => 'userinfo', 'gw' => 'giveaway'][$route] ?? $route;
+                    if (!Switches::on($sw)) {
+                        self::answer([], 0);
+                        return;
+                    }
                     match ($route) {
                         'ai'      => self::ai($rest),
                         'tr'      => self::translate($rest),
@@ -67,7 +72,7 @@ final class InlineHandler
             }
         }
 
-        if (Calculator::looksLikeExpression($query)) {
+        if (Switches::on('calc') && Calculator::looksLikeExpression($query)) {
             self::quickCalc($query);
             return;
         }
@@ -483,12 +488,17 @@ final class InlineHandler
             Ui::article('help_funstat', 'funstat', '🔍 استعلام کاربر', 'id [آیدی عددی]', Ui::guide('funstat'), Ui::tryKeyboard('funstat')),
         ];
 
+        $swMap = ['info' => 'userinfo', 'chess' => 'chess', 'ttt' => 'ttt', 'c4' => 'c4', 'rps' => 'rps', 'math' => 'math', 'calc' => 'calc', 'rates' => 'rates', 'date' => 'date', 'pass' => 'password', 'coin' => 'coin', 'fal' => 'fal',
+            'help_image' => 'image', 'help_whisper' => 'whisper', 'help_giveaway' => 'giveaway', 'help_wiki' => 'wiki', 'help_ai' => 'ai', 'help_translate' => 'translate', 'help_search' => 'search',
+            'help_font' => 'font', 'help_weather' => 'weather', 'help_qr' => 'qr', 'help_roast' => 'roast', 'help_love' => 'love', 'help_nid' => 'nid', 'help_funstat' => 'userinfo'];
+        $items = array_values(array_filter($items, static fn($r) => !isset($swMap[$r['id']]) || Switches::on($swMap[$r['id']])));
+
         if ($filter !== '') {
             $hits = array_values(array_filter($items, static fn($r) => mb_stripos($r['title'] . ' ' . $r['description'], $filter) !== false));
             if ($hits) {
                 $items = $hits;
             }
-            if (mb_strlen($filter) >= 2) {
+            if (mb_strlen($filter) >= 2 && Switches::on('ai')) {
                 array_unshift($items, self::deferredArticle('ai', $filter));
             }
         }

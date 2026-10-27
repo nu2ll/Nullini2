@@ -51,13 +51,22 @@ final class MessageHandler
             $bare = preg_replace('/^' . self::TRIGGER . '[\s،,:]*/u', '', mbTrim($bare)) ?? $bare;
             $link = Downloader::match($bare);
         }
+        // ریپلای روی پیام ابزارها (دانلودر، تاس، هوا، روست و...) به هوش مصنوعی نره؛ مگه اسم/منشنِ ربات توش باشه
+        $toolReply = self::isReplyToBot($msg)
+            && !AI::isAiMsg($msg['chat']['id'], (int) ($msg['reply_to_message']['message_id'] ?? 0))
+            && !$mentioned && !$startsWithName;
+        if ($link !== null && !Switches::on('download')) {
+            return;
+        }
         $shouldRespond  = $link !== null
-            || $private
-            || ($group && !empty($msg['is_automatic_forward']))
-            || ($group && self::isReplyToBot($msg))
-            || ($group && $mentioned)
-            || ($group && is_array($msg['dice'] ?? null))
-            || ($group && mb_strpos($text, self::TRIGGER) !== false);
+            || (!$toolReply && (
+                $private
+                || ($group && !empty($msg['is_automatic_forward']))
+                || ($group && self::isReplyToBot($msg))
+                || ($group && $mentioned)
+                || ($group && is_array($msg['dice'] ?? null))
+                || ($group && mb_strpos($text, self::TRIGGER) !== false)
+            ));
 
         if (!$shouldRespond) {
             return;
@@ -128,6 +137,11 @@ final class MessageHandler
             return true;
         }
         Users::hit("cmd:{$cmd}");
+
+        $gate = ['wk' => 'wiki', 'wiki' => 'wiki', 'giveaway' => 'giveaway', 'gw' => 'giveaway', 'image' => 'image', 'img' => 'image', 'font' => 'font', 'ft' => 'font', 'tr' => 'translate', 'translate' => 'translate'][$cmd] ?? null;
+        if ($gate !== null && !Switches::guard($gate)) {
+            return true;
+        }
 
         switch ($cmd) {
             case 'start':
@@ -232,6 +246,49 @@ final class MessageHandler
                 }
                 $r = Backup::push('manual');
                 $tg->reply($msg, str_starts_with($r, 'ok') ? '✅ بکاپ تو گیت‌هاب ذخیره شد.' : "❌ بکاپ نشد.\n<code>" . h($r) . '</code>');
+                return true;
+
+            case 'tools':
+                if (!App::isAdmin((int) $from['id'])) {
+                    return false;
+                }
+                $tg->reply($msg, Switches::text(), ['reply_markup' => Switches::keyboard()]);
+                return true;
+
+            case 'ban':
+            case 'unban':
+            case 'banned':
+                if (!App::isAdmin((int) $from['id'])) {
+                    return false;
+                }
+                if ($cmd === 'banned') {
+                    $ids = Ban::all();
+                    $tg->reply($msg, $ids
+                        ? '⛔ <b>بن‌شده‌ها (' . fa(count($ids)) . "):</b>\n" . implode("\n", array_map(static fn($i) => '• <code>' . $i . '</code>', array_slice($ids, 0, 50)))
+                        : 'هیچ‌کس بن نیست 👌');
+                    return true;
+                }
+                $r   = $msg['reply_to_message']['from'] ?? null;
+                if (ctype_digit($args)) {
+                    $tid = (int) $args;
+                } elseif ($args !== '' && $args[0] === '@') {
+                    $tid = Ban::byUsername($args);
+                    if ($tid <= 0) {
+                        $tg->reply($msg, 'این یوزرنیم پیدا نشد 😕' . "\n" . 'فقط کسایی که ربات رو استارت کرده باشن (یا تو گروه دیده شده باشن) پیدا می‌شن؛ با ریپلای یا آیدی عددی امتحان کن.');
+                        return true;
+                    }
+                } else {
+                    $tid = ($r && empty($r['is_bot'])) ? (int) $r['id'] : 0;
+                }
+                if ($tid <= 0) {
+                    $tg->reply($msg, "روی پیام کاربر ریپلای کن و /{$cmd} بزن،\nیا آیدی عددی یا یوزرنیمش رو بنویس:\n<code>/{$cmd} 123456</code>\n<code>/{$cmd} @username</code>");
+                    return true;
+                }
+                if ($cmd === 'ban') {
+                    $tg->reply($msg, Ban::add($tid, (int) $from['id']) ? "⛔ کاربر <code>{$tid}</code> بن شد." : '🙅 ادمین رو نمی‌شه بن کرد.');
+                } else {
+                    $tg->reply($msg, Ban::remove($tid) ? "✅ کاربر <code>{$tid}</code> آنبن شد." : 'این کاربر بن نبود.');
+                }
                 return true;
 
             case 'broadcast':

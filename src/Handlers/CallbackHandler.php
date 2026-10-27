@@ -34,6 +34,10 @@ final class CallbackHandler
             AiPanel::onCallback($cq, $data);
             return;
         }
+        if (str_starts_with($data, 'tl:')) {
+            Switches::onCallback($cq, $data);
+            return;
+        }
 
         if (!$imid) {
             self::privateButtons($cq, $data);
@@ -42,6 +46,10 @@ final class CallbackHandler
 
         $prefix = strstr($data, ':', true) ?: $data;
         if (isset(self::GAMES[$prefix])) {
+            if (!Switches::on($prefix)) {
+                $tg->answer($cq);
+                return;
+            }
             call_user_func(self::GAMES[$prefix], $cq, $data, $imid);
             return;
         }

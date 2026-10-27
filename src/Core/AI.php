@@ -27,6 +27,35 @@ final class AI
 
     private const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'];
 
+    public static function searchOn(): bool
+    {
+        return (int) Store::get('cfg', 'ai_search', 1) === 1;
+    }
+
+    public static function setSearch(bool $on): void
+    {
+        Store::set('cfg', 'ai_search', $on ? 1 : 0);
+    }
+
+    /** آخرین نتیجه‌ی هر کلید (برای /quota) */
+    public static function noteKey(string $prov, string $key, int $code): void
+    {
+        Store::set('ai', 'keystat_' . $prov . '_' . substr(md5($key), 0, 10), ['code' => $code, 'at' => time()]);
+    }
+
+    /** پیام‌های جوابِ هوش مصنوعی رو علامت می‌زنه تا ریپلای روی پیام ابزارها (دانلودر، تاس، هوا، روست...) به AI نره */
+    public static function markMsg($chatId, $messageId): void
+    {
+        if ((int) $messageId > 0) {
+            Store::set('aimsg', $chatId . ':' . (int) $messageId, 1);
+        }
+    }
+
+    public static function isAiMsg($chatId, $messageId): bool
+    {
+        return (int) $messageId > 0 && Store::get('aimsg', $chatId . ':' . (int) $messageId) !== null;
+    }
+
     public static function busy(int $uid): bool
     {
         if ($uid <= 0 || App::isAdmin($uid)) {
@@ -167,7 +196,7 @@ final class AI
             $messages = self::audioToText($messages, explode(':', $route, 2)[0], $opt['deadline'] ?? null);
             return $messages === null ? null : FreeAI::chat($route, $messages, $opt);
         }
-        if (!empty($opt['search']) && FreeAI::keys('groq') && !self::hasMedia($messages)) {
+        if (!empty($opt['search']) && self::searchOn() && FreeAI::keys('groq') && !self::hasMedia($messages)) {
             $until = min($opt['deadline'] ?? (microtime(true) + 60), microtime(true) + 30);
             foreach (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'] as $gm) {
                 if ($until - microtime(true) < 4) {
@@ -270,6 +299,7 @@ final class AI
                     ? self::geminiStream($model, $payload, $key, (int) max(5, min($left, 55)), $opt['stream'])
                     : Http::postJson(sprintf(self::API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], (int) max(3, min($left, 10)));
 
+                self::noteKey('gemini', $key, (int) $r['code']);
                 if ($r['code'] === 200 && $r['data'] !== null) {
                     $text = self::extractText($r['data']);
                     if ($text !== null) {
@@ -439,29 +469,20 @@ final class AI
     private static function sourcesBlock(): string
     {
         $seenU = [];
-        $seenT = [];
         $rows  = [];
         $len   = 0;
         foreach (self::$sources as $s) {
-            $url   = (string) ($s['u'] ?? '');
-            $title = trim((string) ($s['t'] ?? ''));
+            $url = (string) ($s['u'] ?? '');
             if (!preg_match('#^https?://#i', $url) || isset($seenU[$url])) {
                 continue;
             }
-            if ($title === '') {
-                $title = (string) (parse_url($url, PHP_URL_HOST) ?: $url);
-            }
-            $title = trim(mb_substr(str_replace(['[', ']', '(', ')', "\n"], ' ', $title), 0, 50));
-            $tk    = mb_strtolower($title);
-            if (isset($seenT[$tk])) {
-                continue;
-            }
-            $row = '[' . $title . '](' . str_replace([')', ' '], ['%29', '%20'], $url) . ')';
-            if ($len + mb_strlen($title) > 1200) { // جا برای خود جواب بمونه
+            $host  = (string) (parse_url($url, PHP_URL_HOST) ?: $url);
+            $title = $host; // آدرس سایت دقیقاً همون‌طور که هست (www داشت می‌مونه، نداشت اضافه نمی‌شه)
+            $row   = '[' . $title . '](' . str_replace([')', ' '], ['%29', '%20'], $url) . ')';
+            if (count($rows) >= 3 || $len + mb_strlen($title) > 1200) { // حداکثر ۳ منبع؛ جا برای خود جواب بمونه
                 break;
             }
             $seenU[$url] = true;
-            $seenT[$tk]  = true;
             $len        += mb_strlen($title) + 3;
             $rows[]      = $row;
         }
@@ -522,7 +543,40 @@ final class AI
             . "\n\n🧠 <b>مصرف امروز</b>\n" . ($use ? implode("\n", $use) : '— هنوز هیچی')
             . "\n\n⏸ <b>در استراحت</b>\n" . ($cool ? implode("\n\n", $cool) : '— هیچ‌کدوم 👌')
             . "\n\n✅ آماده (Gemini): " . fa((string) max(0, $ready)) . ' مدل'
-            . "\n🔑 کلید: " . fa(count(self::keys())) . ' · ریست: ' . Jalali::time(self::quotaResetAt());
+            . "\n🔎 سرچ: " . (self::searchOn() ? 'روشن' : 'خاموش')
+            . "\n\n🔑 <b>وضعیت کلیدها</b> (ریست: " . Jalali::time(self::quotaResetAt()) . ")\n"
+            . self::keyReport('gemini', 'Gemini', self::keys(), $all) . "\n" . self::keyReport('groq', 'Groq', FreeAI::keys('groq'), []);
+    }
+
+    /** وضعیت هر کلید: آخرین نتیجه + تعداد مدل‌های در استراحت (فقط جمنی) */
+    private static function keyReport(string $prov, string $name, array $keys, array $models): string
+    {
+        if (!$keys) {
+            return "▫️ {$name}: کلیدی تنظیم نشده";
+        }
+        $rows = [];
+        foreach ($keys as $i => $key) {
+            $st   = Store::get('ai', 'keystat_' . $prov . '_' . substr(md5($key), 0, 10));
+            $code = is_array($st) ? (int) ($st['code'] ?? -1) : -1;
+            $icon = match (true) {
+                $code === -1                         => '▫️',
+                $code === 200                        => '✅',
+                $code === 429                        => '⏸',
+                in_array($code, [401, 402, 403], true) => '⛔',
+                default                              => '⚠️',
+            };
+            $cool = 0;
+            foreach ($models as $m) {
+                if (self::isCooling($key, $m)) {
+                    $cool++;
+                }
+            }
+            $what = $code === -1 ? 'هنوز استفاده نشده' : ($code === 200 ? 'سالم' : 'خطای ' . fa((string) $code));
+            $rows[] = "{$icon} {$name} " . fa((string) ($i + 1)) . " (…" . h(substr($key, -4)) . "): {$what}"
+                . ($cool > 0 ? ' · ' . fa((string) $cool) . ' مدل در استراحت' : '')
+                . (is_array($st) ? ' · ' . Jalali::time((int) $st['at']) : '');
+        }
+        return implode("\n", $rows);
     }
 
     public static function isServiceSender(?array $from, ?array $senderChat = null): bool

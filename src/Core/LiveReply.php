@@ -59,6 +59,11 @@ final class LiveReply
         return false;
     }
 
+    public function ids(): array
+    {
+        return array_values($this->ids);
+    }
+
     public function active(): bool
     {
         return $this->ids !== [];
