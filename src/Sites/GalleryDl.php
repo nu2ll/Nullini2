@@ -36,7 +36,7 @@ final class GalleryDl
     {
         $bin = self::bin();
         if ($bin === null) {
-            logWarn('photo', 'gallery-dl is not installed');
+            logWarn('dl', 'gallery-dl not found, photo download disabled');
             return [];
         }
         $url  = self::resolve($url);
@@ -53,38 +53,16 @@ final class GalleryDl
         $args[] = $url;
         $res  = Downloader::exec($args, 45);
         $sets = self::parse($res['out']);
-        logInfo('photo', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ': exit=' . $res['code'] . ' sets=' . count($sets));
-        if ($sets !== [] && str_contains((string) parse_url($url, PHP_URL_HOST), 'pinterest')) {
-            logInfo('photo', 'pin meta: ' . self::metaLog($res['out']));
-        }
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        logInfo('dl', "gallery-dl {$host}: count=" . count($sets));
         if ($sets === [] && $depth < 2 && ($next = self::queued($res['out'])) !== null && $next !== $url) {
-            logInfo('photo', 'gallery-dl queued -> ' . (string) parse_url($next, PHP_URL_HOST));
+            logInfo('dl', "gallery-dl {$host}: queued -> " . (string) parse_url($next, PHP_URL_HOST));
             return self::images($next, $depth + 1);
         }
         if ($sets === []) {
-            logWarn('photo', 'gallery-dl empty: rows=' . self::summary($res['out']) . ' err=' . substr(trim($res['err']), -300));
+            logWarn('dl', "gallery-dl {$host} failed (exit {$res['code']}): " . self::lastLine($res['err']));
         }
         return $sets;
-    }
-
-    private static function summary(string $json): string
-    {
-        $data = json_decode(trim($json), true);
-        $out  = [];
-        foreach (is_array($data) ? $data : [] as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $meta  = is_array($row[2] ?? null) ? $row[2] : [];
-            $label = 't' . (string) ($row[0] ?? '?');
-            if (($row[0] ?? null) === 3) {
-                $label .= ':' . (string) ($meta['extension'] ?? pathinfo((string) parse_url((string) ($row[1] ?? ''), PHP_URL_PATH), PATHINFO_EXTENSION));
-            } elseif (($row[0] ?? null) === -1) {
-                $label .= ':' . substr((string) ($row[1]['message'] ?? ''), 0, 80);
-            }
-            $out[] = $label;
-        }
-        return $out === [] ? 'unparsed:' . substr((string) preg_replace('/\\s+/', ' ', $json), 0, 200) : implode(' ', $out);
     }
 
     private static function findGif(array $meta, int $depth = 0): ?string
@@ -100,31 +78,10 @@ final class GalleryDl
         return null;
     }
 
-    private static function leaves(array $meta, string $path, array &$out, int $depth = 0): void
+    private static function lastLine(string $err): string
     {
-        foreach ($meta as $k => $v) {
-            $p = $path === '' ? (string) $k : $path . '.' . $k;
-            if (is_string($v) && preg_match('#\.(gif|mp4|m3u8|webp|jpg|png)(\?|$)#i', $v)) {
-                $out[] = $p . '=' . substr($v, -32);
-            } elseif (is_array($v) && $depth < 4) {
-                self::leaves($v, $p, $out, $depth + 1);
-            }
-        }
-    }
-
-    private static function metaLog(string $json): string
-    {
-        $data = json_decode(trim($json), true);
-        $out  = [];
-        foreach (is_array($data) ? $data : [] as $row) {
-            if (is_array($row) && ($row[0] ?? null) === 3 && is_array($row[2] ?? null)) {
-                $meta = $row[2];
-                unset($meta['board'], $meta['pinner'], $meta['user'], $meta['owner'], $meta['creator']);
-                self::leaves($meta, '', $out);
-                break;
-            }
-        }
-        return substr(implode(' ; ', array_slice($out, 0, 12)), 0, 700);
+        $lines = array_values(array_filter(array_map('trim', explode("\n", $err)), static fn($l) => $l !== ''));
+        return mb_substr((string) end($lines), 0, 300);
     }
 
     public static function queued(string $json): ?string

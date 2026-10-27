@@ -20,19 +20,17 @@ final class Photos
         try {
             $sets = array_slice(self::find($link['site'], $link['url']), 0, self::MAX);
         } catch (\Throwable $e) {
-            logWarn('photo', $link['site'] . ': ' . $e->getMessage());
+            logWarn('dl', $link['site'] . ' photo failed: ' . $e->getMessage());
             return false;
         }
-        logInfo('photo', $link['site'] . ': found ' . count($sets) . ' image(s), expect ' . $expect);
+        logInfo('dl', "photo {$link['site']}: count=" . count($sets) . " expect={$expect}");
         if (!$sets) {
-            logInfo('photo', $link['site'] . ' no images found');
             return false;
         }
         if ($expect > 1 && count($sets) < $expect) {
-            logInfo('photo', $link['site'] . ': found ' . count($sets) . ' of ' . $expect . ', falling back to yt-dlp');
+            logInfo('dl', "photo {$link['site']}: got " . count($sets) . " of {$expect}, falling back to yt-dlp");
             return false;
         }
-        logInfo('photo', $link['site'] . ': urls=' . implode(' | ', array_map(static fn(array $c): string => substr((string) ($c[0] ?? ''), -45), array_slice($sets, 0, 4))));
         $tg->action($chat, 'upload_photo');
         $cap  = '🖼 از ' . $link['name'];
         $sent = count($sets) === 1 ? self::single($chat, $sets[0], $cap, (int) $msg['message_id']) : self::album($chat, $sets, $cap, (int) $msg['message_id']);
@@ -52,7 +50,7 @@ final class Photos
         try {
             $sets = self::find($link['site'], $link['url']);
         } catch (\Throwable $e) {
-            logWarn('photo', $link['site'] . ': ' . $e->getMessage());
+            logWarn('dl', $link['site'] . ' photo failed: ' . $e->getMessage());
             return false;
         }
         foreach (array_slice($sets, 0, 1) as $cands) {
@@ -98,36 +96,11 @@ final class Photos
     {
         return match ($site) {
             'instagram' => GalleryDl::images($url),
-            'pinterest' => self::pinterest($url),
+            'pinterest' => GalleryDl::images($url),
             'twitter'   => self::twitter($url),
             'reddit'    => self::reddit($url),
             default     => [],
         };
-    }
-
-    private static function pinterest(string $url): array
-    {
-        $script = NULLINI_ROOT . '/bin/pin.py';
-        $data   = null;
-        if (is_file($script)) {
-            $res  = Downloader::exec(['python3', $script, $url], 30);
-            $data = json_decode(trim($res['out']), true);
-        }
-        $ok   = is_array($data) && !empty($data['ok']);
-        $type = $ok ? strtolower((string) ($data['type'] ?? '')) : '';
-        $gif  = $ok ? (string) ($data['gif'] ?? '') : '';
-        $imgs = $ok ? array_values(array_filter((array) ($data['images'] ?? []), static fn($u): bool => is_string($u) && preg_match('#^https?://#', $u) === 1)) : [];
-        logInfo('photo', 'pin lib: ok=' . (int) $ok . ' type=' . ($type !== '' ? $type : '-') . ' gif=' . ($gif !== '' ? '1' : '0') . ' images=' . count($imgs) . (is_array($data) && isset($data['error']) ? ' err=' . $data['error'] : ''));
-        if ($gif !== '' && preg_match('#^https?://#', $gif)) {
-            return [[$gif]];
-        }
-        if ($ok && $type === 'video') {
-            return [];
-        }
-        if ($imgs !== []) {
-            return [$imgs];
-        }
-        return GalleryDl::images($url);
     }
 
     private static function twitter(string $url): array
@@ -183,13 +156,13 @@ final class Photos
                 $mm = $p['media_metadata'][$it['media_id'] ?? ''] ?? null;
                 $u  = (string) ($mm['s']['u'] ?? $mm['s']['gif'] ?? '');
                 if ($u !== '' && ($mm['e'] ?? 'Image') !== 'RedditVideo') {
-                    $out[] = [self::unescape($u)];
+                    $out[] = [Scrape::unescape($u)];
                 }
             }
             return $out;
         }
         $direct = (string) ($p['url_overridden_by_dest'] ?? $p['url'] ?? '');
-        $prev   = self::unescape((string) ($p['preview']['images'][0]['source']['url'] ?? ''));
+        $prev   = Scrape::unescape((string) ($p['preview']['images'][0]['source']['url'] ?? ''));
         if (preg_match('#\.(jpe?g|png|gif|webp)(\?|$)#i', $direct)) {
             return [self::unique([$direct, $prev])];
         }
@@ -206,9 +179,6 @@ final class Photos
         $r   = Http::request('GET', $url, ['timeout' => 40, 'headers' => ['User-Agent: ' . self::UA, 'Accept: image/avif,image/webp,image/*,*/*']]);
         $b   = $r['body'];
         $gif = $b !== null && str_starts_with($b, 'GIF');
-        if (str_ends_with(strtolower((string) parse_url($url, PHP_URL_PATH)), '.gif')) {
-            logInfo('photo', 'gif fetch code=' . $r['code'] . ' bytes=' . strlen((string) $b) . ' gif=' . ($gif ? '1' : '0'));
-        }
         if ($b === null || $r['code'] >= 400 || strlen($b) < 800 || strlen($b) > ($gif ? 30 : 10) * 1048576) {
             return null;
         }
@@ -235,15 +205,12 @@ final class Photos
             if (!rename($base, $in) || file_put_contents($in, $b) === false) {
                 return null;
             }
-            foreach (['timeout 30 heif-convert -q 92 ', 'timeout 30 ffmpeg -y -v error -i '] as $cmd) {
-                @unlink($out);
-                @exec($cmd . escapeshellarg($in) . ' ' . escapeshellarg($out) . ' 2>&1', $o, $rc);
-                $jpg = is_file($out) ? (string) file_get_contents($out) : '';
-                if ($jpg !== '' && @getimagesizefromstring($jpg) !== false) {
-                    return $jpg;
-                }
+            @exec('timeout 30 ffmpeg -y -v error -i ' . escapeshellarg($in) . ' ' . escapeshellarg($out) . ' 2>&1', $o, $rc);
+            $jpg = is_file($out) ? (string) file_get_contents($out) : '';
+            if ($jpg !== '' && @getimagesizefromstring($jpg) !== false) {
+                return $jpg;
             }
-            logWarn('photo', 'heic convert failed');
+            logWarn('dl', 'heic convert failed (ffmpeg exit ' . $rc . ')');
             return null;
         } finally {
             @unlink($base);
@@ -259,7 +226,6 @@ final class Photos
             if ($b === null) {
                 continue;
             }
-            logInfo('photo', 'single bytes=' . strlen($b) . ' head=' . bin2hex(substr($b, 0, 4)) . ' gif=' . (str_starts_with($b, 'GIF') ? '1' : '0'));
             $sent = str_starts_with($b, 'GIF')
                 ? App::tg()->sendAnimationBytes($chat, $b, $cap, $replyTo)
                 : App::tg()->sendPhotoBytes($chat, $b, $cap, $replyTo);

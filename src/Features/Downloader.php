@@ -199,10 +199,10 @@ final class Downloader
             return '⚠️ دانلودر هنوز رو سرور نصب نشده؛' . "\n" . 'یه‌کم دیگه دوباره امتحان کن.';
         }
         if (!App::isAdmin($uid) && self::usedToday($uid) >= self::DAILY) {
-            return '✋ امروز سهمیه‌ی دانلودت (' . fa(self::DAILY) . ' تا) تموم شده؛' . "\n" . 'فردا دوباره بیا 🙂';
+            return 'فردا دوباره بیا 🙂' . "\n" . '✋ امروز سهمیه‌ی دانلودت (' . fa(self::DAILY) . ' تا) تموم شده؛';
         }
         if ($link['site'] === 'instagram' && preg_match('#instagram\.com/(stories/|s/)#i', $link['url'])) {
-            return "📸 استوری اینستا رو دانلود نمی‌کنم؛\nپست و ریلز رو بفرست 🙂";
+            return "پست و ریلز رو بفرست 🙂\n📸 استوری اینستا رو دانلود نمی‌کنم؛";
         }
         return null;
     }
@@ -433,7 +433,7 @@ final class Downloader
             return ['ok' => 'sent'];
         }
         if (!App::isAdmin($uid) && self::usedToday($uid) >= self::DAILY) {
-            return ['error' => '✋ امروز سهمیه‌ی دانلودت (' . fa(self::DAILY) . ' تا) تموم شده؛' . "\n" . 'فردا دوباره بیا 🙂'];
+            return ['error' => 'فردا دوباره بیا 🙂' . "\n" . '✋ امروز سهمیه‌ی دانلودت (' . fa(self::DAILY) . ' تا) تموم شده؛'];
         }
         $got = Store::update('dl_busy', (string) $uid, static fn($at) => (is_int($at) && time() - $at < self::jobTime() + 20) ? null : time());
         if ($got === null) {
