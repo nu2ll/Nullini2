@@ -32,7 +32,7 @@ final class Search
         if (mb_strlen($q) < 2) {
             return [];
         }
-        $list = Store::remember('cache', 'search_' . md5(mb_strtolower($q)), 3600, static fn() => self::fetch($q, $limit));
+        $list = Store::remember('cache', 'search10_' . md5(mb_strtolower($q)), 3600, static fn() => self::fetch($q, 10));
         return is_array($list) ? array_slice($list, 0, $limit) : [];
     }
 

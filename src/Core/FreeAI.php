@@ -12,8 +12,7 @@ final class FreeAI
             'openai/gpt-oss-120b',
             'openai/gpt-oss-20b',
             'qwen/qwen3.8-27b',
-            'llama-3.3-70b-versatile',
-            'llama-3.1-8b-instant',
+            'allam-2-7b',
         ],
     ];
     private const VISION = '/scout|maverick|vision|llava|\bvl\b|qwen3\.\d/i';
@@ -320,6 +319,14 @@ final class FreeAI
                 if ($text === null) {
                     logWarn('ai', "{$route}: empty reply");
                     return ['text' => null, 'kind' => 'empty', 'seen' => []];
+                }
+                AI::$sources = [];
+                foreach ((array) ($msg['executed_tools'] ?? []) as $et) {
+                    foreach ((array) ($et['search_results']['results'] ?? []) as $sr) {
+                        if (!empty($sr['url'])) {
+                            AI::$sources[] = ['t' => (string) ($sr['title'] ?? ''), 'u' => (string) $sr['url']];
+                        }
+                    }
                 }
                 Users::hit('model:' . $prov . '-' . $model);
                 return ['text' => $text, 'kind' => 'ok', 'seen' => []];

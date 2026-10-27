@@ -135,7 +135,7 @@ final class Intent
                 return $arg === '' ? null : ['text' => Fonts::listText($arg)];
 
             case 'qr':
-                return $arg === '' ? null : ['photo' => Tools::qrUrl($arg, 512), 'text' => '🔳 <code>' . h(mb_substr($arg, 0, 900)) . '</code>'];
+                return $arg === '' ? null : ['photo' => Tools::qrUrl($arg, 512), 'text' => '🔳 <code>' . h(mb_substr($arg, 0, 1000)) . '</code>'];
 
             case 'fal':
                 return ['anim' => Tools::hafezUrl(), 'text' => Tools::hafezCaption()];
@@ -164,7 +164,7 @@ final class Intent
                 if (mb_strlen($arg) < 2) {
                     return null;
                 }
-                $list  = Search::results($arg, 5);
+                $list  = Search::results($arg, 10);
                 $lines = [];
                 foreach ($list as $i => $r) {
                     $lines[] = fa((string) ($i + 1)) . '. <a href="' . h($r['url']) . '">' . h(mb_substr($r['title'], 0, 90)) . '</a>'

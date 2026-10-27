@@ -102,10 +102,10 @@ final class InlineHandler
     private static function deferredArticle(string $kind, string $q): array
     {
         $token = substr(md5($kind . $q . self::$iq['from']['id'] . microtime()), 0, 12);
-        Store::set('inline_ai', $token, ['kind' => $kind, 'q' => mb_substr($q, 0, 1500), 'name' => userName(self::$iq['from']), 'from' => self::$iq['from']]);
+        Store::set('inline_ai', $token, ['kind' => $kind, 'q' => mb_substr($q, 0, 256), 'name' => userName(self::$iq['from']), 'from' => self::$iq['from']]);
 
         $isAi  = $kind === 'ai';
-        $head  = $isAi ? '❓ <b>' . h(mb_substr($q, 0, 300)) . '</b>' : '📝 ' . h(mb_substr($q, 0, 600));
+        $head  = $isAi ? '❓ <b>' . h(mb_substr($q, 0, 256)) . '</b>' : '📝 ' . h(mb_substr($q, 0, 256));
         $wait  = $isAi ? '🧠 نالینی داره فکر می‌کنه...' : '🌐 در حال ترجمه...';
         return Ui::article(
             "{$kind}q_{$token}",
@@ -200,7 +200,7 @@ final class InlineHandler
 
     private static function aiHead(string $q): string
     {
-        return '❓ <b>' . h(mb_substr($q, 0, 300)) . "</b>\n\n🧠 ";
+        return '❓ <b>' . h(mb_substr($q, 0, 256)) . "</b>\n\n🧠 ";
     }
 
     private static function deferredText(string $kind, string $q, string $name, string $imid): string
@@ -212,7 +212,7 @@ final class InlineHandler
             $text   = self::aiHead($q) . AI::toHtml(AI::fit($answer, self::aiHead($q)));
         } else {
             $out  = AI::translateFast($q);
-            $text = h(mb_substr($q, 0, 1500)) . "\n\n🌐 " . ($out !== null ? h($out) : AI::FAIL_TEXT);
+            $text = h(mb_substr($q, 0, 256)) . "\n\n🌐 " . ($out !== null ? h($out) : AI::FAIL_TEXT);
         }
         return $text;
     }
@@ -356,7 +356,7 @@ final class InlineHandler
             self::guide('qr', 'qr', '🔳 QR کد', 'بعد از qr متن یا لینک رو بنویس');
             return;
         }
-        $text = mb_substr($text, 0, 900);
+        $text = mb_substr($text, 0, 1000);
         self::answer([[
             'type'          => 'photo',
             'id'            => 'qr_' . substr(md5($text), 0, 16),
@@ -366,7 +366,7 @@ final class InlineHandler
             'photo_height'  => 512,
             'title'         => '🔳 QR کد',
             'description'   => mb_substr($text, 0, 60),
-            'caption'       => '🔳 <code>' . h(mb_substr($text, 0, 900)) . '</code>',
+            'caption'       => '🔳 <code>' . h(mb_substr($text, 0, 1000)) . '</code>',
             'parse_mode'    => 'HTML',
         ]], 300, false);
     }
@@ -386,7 +386,7 @@ final class InlineHandler
             "🔍 <b>" . h($q) . "</b>\n\n👇 نتایج رو همین‌جا تو تلگرام ببین",
             Search::keyboard($q)
         )];
-        foreach (Search::results($q, 6) as $i => $r) {
+        foreach (Search::results($q, 10) as $i => $r) {
             $a                  = Ui::article('sr_' . substr(md5($r['url']), 0, 16), 'search', $r['title'], $r['snippet'] !== '' ? $r['snippet'] : $r['url'], Search::resultText($r), ikb([[urlBtn('🌐 باز کردن', $r['url'], null)]]));
             $a['thumbnail_url'] = Search::favicon($r['url']);
             $a['url']           = $r['url'];

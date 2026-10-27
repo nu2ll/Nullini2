@@ -364,6 +364,23 @@ final class Assistant
         usleep((int) ($seconds * 1_000_000));
     }
 
+    /** کاربر ویس فرستاده بود → جواب رو ویس هم می‌فرسته (Gemini-TTS) */
+    private static function voiceReply(array $msg, string $answer): void
+    {
+        $tg = App::tg();
+        $tg->action($msg['chat']['id'], 'record_voice');
+        $file = AI::speak($answer);
+        if ($file === null) {
+            return;
+        }
+        $tg->call('sendVoice', [
+            'chat_id'          => $msg['chat']['id'],
+            'voice'            => new CURLFile($file, 'audio/ogg', 'voice.ogg'),
+            'reply_parameters' => ['message_id' => $msg['message_id'], 'allow_sending_without_reply' => true],
+        ], 60);
+        @unlink($file);
+    }
+
     private static function send(array $msg, string $answer): void
     {
         $tg = App::tg();
@@ -467,7 +484,8 @@ final class Assistant
         }
 
         $history = $service ? [] : self::history($chatId, $userId);
-        $live    = App::cfg('ai_stream', true) ? new LiveReply($msg) : null;
+        $voiceIn = isset($msg['voice']) && !$service;
+        $live    = App::cfg('ai_stream', true) && !$voiceIn ? new LiveReply($msg) : null;
         $opt     = ['max_len' => PHP_INT_MAX] + ($live ? ['on_text' => $live->feed(...)] : []);
         $res     = AI::reply($content, $ctx, $history, $opt);
 
@@ -502,13 +520,17 @@ final class Assistant
         }
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
 
+        if ($res['answer'] !== null && $voiceIn) {
+            self::voiceReply($msg, $res['answer']);
+        }
+
         if (!$live || !$live->finish($answer)) {
             self::typing($chatId, $answer);
             self::send($msg, $answer);
         }
 
         if ($res['answer'] !== null && !$service) {
-            self::remember($chatId, $userId, $log, $res['answer']);
+            self::remember($chatId, $userId, $log, preg_replace('/\n\n🔗 منابع:.*$/su', '', $res['answer']) ?? $res['answer']);
         }
     }
 

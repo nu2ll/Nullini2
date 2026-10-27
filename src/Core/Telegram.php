@@ -240,6 +240,23 @@ final class Telegram
         return $id;
     }
 
+    public function audioFileId(int|string $chatId, string $file): ?string
+    {
+        $r = $this->call('sendAudio', [
+            'chat_id'              => $chatId,
+            'audio'                => new CURLFile($file, 'audio/mpeg', 'voice.mp3'),
+            'disable_notification' => true,
+        ], 90);
+        if (empty($r['ok'])) {
+            return null;
+        }
+        $id = $r['result']['audio']['file_id'] ?? null;
+        if (isset($r['result']['message_id'])) {
+            $this->call('deleteMessage', ['chat_id' => $chatId, 'message_id' => $r['result']['message_id']]);
+        }
+        return $id;
+    }
+
     public function sendPhotoBytes(int|string $chatId, string $bytes, string $caption = '', ?int $replyTo = null): bool
     {
         $info = @getimagesizefromstring($bytes);

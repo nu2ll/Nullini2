@@ -12,6 +12,9 @@ final class AI
 
     public const SERVICE_IDS = [777000, 1087968824, 136817688];
 
+    /** منابع سرچِ آخرین جواب: [['t' => عنوان, 'u' => لینک], ...] */
+    public static array $sources = [];
+
     public const FAIL_TEXT = '😕 الان مغزم هنگ کرده، یه‌کم دیگه دوباره بپرس.';
 
     private const API = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
@@ -146,6 +149,7 @@ final class AI
 
     public static function chat(array $messages, array $opt = []): ?string
     {
+        self::$sources = [];
         $route = self::route();
         if ($route !== 'gemini' && !str_starts_with($route, 'gemini:')) {
             $messages = self::audioToText($messages, explode(':', $route, 2)[0], $opt['deadline'] ?? null);
@@ -231,6 +235,7 @@ final class AI
                 if ($r['code'] === 200 && $r['data'] !== null) {
                     $text = self::extractText($r['data']);
                     if ($text !== null) {
+                        self::$sources = self::groundingSources($r['data']);
                         Users::hit('model:' . $model);
                         return $text;
                     }
@@ -298,15 +303,19 @@ final class AI
         $text   = '';
         $buf    = '';
         $finish = null;
+        $gm     = [];
 
         $r = Http::stream(sprintf(self::STREAM_API, rawurlencode($model)), $payload, ['x-goog-api-key: ' . $key], $timeout,
-            static function (string $chunk) use (&$text, &$buf, &$finish, $emit): void {
+            static function (string $chunk) use (&$text, &$buf, &$finish, &$gm, $emit): void {
                 foreach (Http::sseData($buf, $chunk) as $json) {
                     $d = json_decode($json, true);
                     if (!is_array($d)) {
                         continue;
                     }
                     $finish = $d['candidates'][0]['finishReason'] ?? $d['promptFeedback']['blockReason'] ?? $finish;
+                    if (!empty($d['candidates'][0]['groundingMetadata']['groundingChunks'])) {
+                        $gm = $d['candidates'][0]['groundingMetadata'];
+                    }
                     $delta  = '';
                     foreach ($d['candidates'][0]['content']['parts'] ?? [] as $p) {
                         if (empty($p['thought']) && isset($p['text'])) {
@@ -324,7 +333,7 @@ final class AI
             if ($text === '' && $r['error'] !== '') {
                 return ['code' => 0, 'data' => null, 'raw' => $r['error']];
             }
-            $cand = $text !== '' ? ['content' => ['parts' => [['text' => $text]]]] : ['finishReason' => $finish];
+            $cand = $text !== '' ? ['content' => ['parts' => [['text' => $text]]], 'groundingMetadata' => $gm] : ['finishReason' => $finish];
             return ['code' => 200, 'data' => ['candidates' => [$cand]], 'raw' => ''];
         }
 
@@ -333,6 +342,128 @@ final class AI
             $data = $data[0];
         }
         return ['code' => $r['code'], 'data' => is_array($data) ? $data : null, 'raw' => $r['raw'] !== '' ? $r['raw'] : $r['error']];
+    }
+
+    /** مدل‌های ویس Gemini (به ترتیب تلاش) */
+    private const TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
+
+    /**
+     * متن → ویس با Gemini-TTS. مسیر فایل OGG/Opus رو برمی‌گردونه (برای sendVoice) یا null.
+     * فایل رو بعد از ارسال خودت پاک کن.
+     */
+    public static function speak(string $text, ?float $deadline = null, string $ext = 'ogg'): ?string
+    {
+        $keys = self::keys();
+        $text = trim((string) preg_replace(['/\n\n🔗 منابع:.*$/su', '#https?://\S+#u', '/[`*_#>]+/u', '/\s+/u'], ['', '', '', ' '], $text));
+        if (!$keys || $text === '') {
+            return null;
+        }
+        $deadline ??= microtime(true) + 45;
+        $n         = count($keys);
+        $start     = self::startIndex($n);
+
+        foreach (self::TTS_MODELS as $model) {
+            for ($i = 0; $i < $n; $i++) {
+                $key = $keys[($start + $i) % $n];
+                $left = $deadline - microtime(true);
+                if ($left < 5) {
+                    return null;
+                }
+                if (self::isCooling($key, $model)) {
+                    continue;
+                }
+                $r = Http::postJson(sprintf(self::API, rawurlencode($model)), [
+                    'contents'         => [['parts' => [['text' => "Read this aloud naturally, in the same language as the text:\n\n" . $text]]]],
+                    'generationConfig' => [
+                        'responseModalities' => ['AUDIO'],
+                        'speechConfig'       => ['voiceConfig' => ['prebuiltVoiceConfig' => ['voiceName' => 'Puck']]],
+                    ],
+                ], ['x-goog-api-key: ' . $key], (int) max(8, min($left, 40)));
+
+                $b64 = $r['data']['candidates'][0]['content']['parts'][0]['inlineData']['data'] ?? null;
+                if ($r['code'] === 200 && is_string($b64) && $b64 !== '') {
+                    $out = self::pcmToAudio((string) base64_decode($b64), $ext);
+                    if ($out !== null) {
+                        return $out;
+                    }
+                    logWarn('ai', "tts {$model}: ffmpeg convert failed");
+                    return null;
+                }
+                logWarn('ai', "tts {$model} key" . (($start + $i) % $n) . " HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $r['raw']), 0, 160));
+                if ($r['code'] === 429) {
+                    self::cool($key, $model, time() + 120, 'محدودیت ویس');
+                } elseif ($r['code'] === 400 || $r['code'] === 404) {
+                    continue 2; // این مدل برای این کلید/زبان جواب نمی‌ده؛ مدل بعدی
+                }
+            }
+        }
+        return null;
+    }
+
+    /** PCM خام (16bit mono 24kHz) → فایل OGG/Opus یا MP3 */
+    private static function pcmToAudio(string $pcm, string $ext = 'ogg'): ?string
+    {
+        if ($pcm === '') {
+            return null;
+        }
+        $base  = tempnam(sys_get_temp_dir(), 'tts');
+        $in    = $base . '.pcm';
+        $out   = $base . '.' . $ext;
+        $codec = $ext === 'mp3' ? '-c:a libmp3lame -b:a 64k' : '-c:a libopus -b:a 32k -application voip';
+        file_put_contents($in, $pcm);
+        @exec('timeout 30 ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i ' . escapeshellarg($in) . ' -t 60 ' . $codec . ' ' . escapeshellarg($out) . ' 2>&1', $o, $rc);
+        @unlink($in);
+        @unlink($base);
+        if ($rc !== 0 || !is_file($out) || filesize($out) < 200) {
+            @unlink($out);
+            return null;
+        }
+        return $out;
+    }
+
+    private static function groundingSources(array $data): array
+    {
+        $out = [];
+        foreach ($data['candidates'][0]['groundingMetadata']['groundingChunks'] ?? [] as $c) {
+            $u = (string) ($c['web']['uri'] ?? '');
+            if ($u !== '') {
+                $out[] = ['t' => (string) ($c['web']['title'] ?? ''), 'u' => $u];
+            }
+        }
+        return $out;
+    }
+
+    /** لیست منابع آخر جواب به‌شکل لینک مارک‌داون (toHtml تبدیلش می‌کنه) */
+    private static function sourcesBlock(): string
+    {
+        $seenU = [];
+        $seenT = [];
+        $rows  = [];
+        $len   = 0;
+        foreach (self::$sources as $s) {
+            $url   = (string) ($s['u'] ?? '');
+            $title = trim((string) ($s['t'] ?? ''));
+            if (!preg_match('#^https?://#i', $url) || isset($seenU[$url])) {
+                continue;
+            }
+            if ($title === '') {
+                $title = (string) (parse_url($url, PHP_URL_HOST) ?: $url);
+            }
+            $title = trim(mb_substr(str_replace(['[', ']', '(', ')', "\n"], ' ', $title), 0, 50));
+            $tk    = mb_strtolower($title);
+            if (isset($seenT[$tk])) {
+                continue;
+            }
+            $row = '[' . $title . '](' . str_replace([')', ' '], ['%29', '%20'], $url) . ')';
+            if ($len + mb_strlen($title) > 1200) { // جا برای خود جواب بمونه
+                break;
+            }
+            $seenU[$url] = true;
+            $seenT[$tk]  = true;
+            $len        += mb_strlen($title) + 3;
+            $rows[]      = $row;
+        }
+        return $rows ? "\n\n🔗 منابع: " . implode(' • ', $rows) : '';
     }
 
     private static function extractText(array $data): ?string
@@ -513,8 +644,9 @@ final class AI
             return $out;
         }
 
-        $text          = self::clean($text, $opt['max_len'] ?? 4096);
-        $out['answer'] = $text !== '' ? $text : null;
+        $src           = self::sourcesBlock();
+        $text          = self::clean($text, ($opt['max_len'] ?? 4096) - mb_strlen($src));
+        $out['answer'] = $text !== '' ? $text . $src : null;
         return $out;
     }
 
@@ -641,7 +773,7 @@ final class AI
         }
         $out = '';
         foreach ($parts as $i => $part) {
-            $out .= $i % 2 === 1 ? '<pre>' . h(rtrim($part)) . '</pre>' : h($part);
+            $out .= $i % 2 === 1 ? '<pre>' . h(rtrim($part)) . '</pre>' : (preg_replace('/\[([^\]\n]{1,100})\]\((https?:\/\/[^)\s]+)\)/u', '<a href="$2">$1</a>', h($part)) ?? h($part));
         }
         return preg_replace('/`([^`\n]{1,200})`/u', '<code>$1</code>', $out) ?? $out;
     }
@@ -716,7 +848,7 @@ final class AI
         return [
             'status'  => 'ok',
             'prompt'  => mb_substr(mbTrim($pm[1], " \t\"'«»"), 0, 700),
-            'caption' => $caption ? mb_substr($caption, 0, 200) : null,
+            'caption' => $caption ? mb_substr($caption, 0, 1024) : null,
         ];
     }
 

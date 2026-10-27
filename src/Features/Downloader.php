@@ -295,7 +295,7 @@ final class Downloader
         Store::set('dl', $token, [
             'url'      => (string) ($info['webpage_url'] ?? $link['url']),
             'site'     => $link['site'],
-            'title'    => mb_substr((string) ($info['title'] ?? $link['name']), 0, 200),
+            'title'    => mb_substr((string) ($info['title'] ?? $link['name']), 0, 3500),
             'uploader' => mb_substr((string) ($info['uploader'] ?? $info['channel'] ?? $info['uploader_id'] ?? ''), 0, 80),
             'duration' => (int) ($info['duration'] ?? 0),
             'width'    => (int) ($info['width'] ?? 0),
@@ -429,7 +429,7 @@ final class Downloader
 
     private static function cardText(array $info, array $link, bool $hasVideo): string
     {
-        $title = mb_substr((string) ($info['title'] ?? ''), 0, 150);
+        $title = mb_substr((string) ($info['title'] ?? ''), 0, 3500);
         $who   = (string) ($info['uploader'] ?? $info['channel'] ?? '');
         $meta  = [];
         if ($who !== '') {
@@ -1003,13 +1003,13 @@ final class Downloader
 
     private static function stageText(array $job, string $status): string
     {
-        return '📥 <b>' . h(mb_substr($job['title'], 0, 120)) . "</b>\n\n" . $status;
+        return '📥 <b>' . h(mb_substr($job['title'], 0, 3500)) . "</b>\n\n" . $status;
     }
 
     private static function caption(array $job): string
     {
         $bot = App::botUsername();
-        $head = '🎬 <b>' . h(mb_substr($job['title'], 0, 200)) . "</b>\n"
+        $head = '🎬 <b>' . h(mb_substr($job['title'], 0, 800)) . "</b>\n"
             . ($job['uploader'] !== '' ? '👤 ' . h($job['uploader']) . "\n" : '');
         return $head . "\n📥 <a href=\"https://t.me/{$bot}\">@{$bot}</a>";
     }

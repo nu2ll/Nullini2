@@ -17,7 +17,7 @@ final class Wiki
         $list = Store::remember('cache', 'wiki:' . $lang . ':' . md5(mb_strtolower($q) . '|' . $limit), 6 * 3600, static function () use ($q, $limit, $lang) {
             $j = Http::getJson("https://{$lang}.wikipedia.org/w/api.php?" . http_build_query([
                 'action' => 'query', 'format' => 'json', 'formatversion' => 2, 'redirects' => 1, 'generator' => 'search', 'gsrsearch' => $q, 'gsrlimit' => $limit,
-                'prop' => 'extracts|pageimages|info|description', 'exintro' => 1, 'explaintext' => 1, 'exchars' => 900, 'exlimit' => 'max',
+                'prop' => 'extracts|pageimages|info|description', 'exintro' => 1, 'explaintext' => 1, 'exchars' => 1200, 'exlimit' => 'max',
                 'piprop' => 'thumbnail', 'pithumbsize' => 500, 'inprop' => 'url',
             ]), ['User-Agent: NulliniBot/3.0 (https://t.me/NulliniBot)'], 8);
             if (!is_array($j)) {
@@ -34,7 +34,7 @@ final class Wiki
                 $out[] = [
                     'title' => (string) ($p['title'] ?? ''),
                     'desc'  => mb_substr((string) ($p['description'] ?? ''), 0, 120),
-                    'text'  => mb_substr($ext, 0, 900),
+                    'text'  => mb_substr($ext, 0, 3500),
                     'thumb' => (string) ($p['thumbnail']['source'] ?? ''),
                     'url'   => (string) ($p['fullurl'] ?? "https://{$lang}.wikipedia.org/wiki/" . rawurlencode(str_replace(' ', '_', (string) ($p['title'] ?? '')))),
                     'lang'  => $lang,

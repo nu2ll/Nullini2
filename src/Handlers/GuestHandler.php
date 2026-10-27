@@ -103,9 +103,41 @@ final class GuestHandler
             return;
         }
 
+        if ($res['answer'] !== null && $imid !== null && isset($msg['voice']) && self::voice($imid, $res['answer'])) {
+            return;
+        }
+
         $answer = $res['answer'] ?? AI::FAIL_TEXT;
         $html   = AI::toHtml(AI::fit($answer));
         self::edit($imid, $qid, $html, $answer);
+    }
+
+    private static function voice(string $imid, string $answer): bool
+    {
+        $html = AI::toHtml($answer);
+        if (AI::visible($html) > 1024) {
+            return false;
+        }
+        $chat = (string) App::cfg('storage_chat', '');
+        $chat = $chat !== '' ? $chat : (string) (App::cfg('admins', [])[0] ?? '');
+        if ($chat === '') {
+            return false;
+        }
+        $file = AI::speak($answer, null, 'mp3');
+        if ($file === null) {
+            return false;
+        }
+        $tg = App::tg();
+        $id = $tg->audioFileId($chat, $file);
+        @unlink($file);
+        if ($id === null) {
+            return false;
+        }
+        $r = $tg->call('editMessageMedia', [
+            'inline_message_id' => $imid,
+            'media'             => ['type' => 'audio', 'media' => $id, 'caption' => $html, 'parse_mode' => 'HTML'],
+        ], 60);
+        return !empty($r['ok']);
     }
 
     public static function image(?string $imid, ?string $qid, string $prompt): void
