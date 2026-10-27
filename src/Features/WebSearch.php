@@ -7,7 +7,7 @@
  */
 final class WebSearch
 {
-    public const MAX_ROUNDS = 2;
+    public const MAX_ROUNDS = 1;
 
     private const URL = 'https://api.tavily.com/search';
 
