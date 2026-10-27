@@ -109,7 +109,7 @@ final class Switches
     public static function text(): string
     {
         $off = self::load();
-        return "<b>🧰 مدیریت ابزارها</b>\n\nروی هر دکمه بزنی روشن/خاموش می‌شه.\n✅ روشن · ⛔ خاموش"
+        return "<b>🧰 مدیریت ابزارها</b>\n\nروی هر دکمه بزنی روشن/خاموش می‌شه.\nروشن · ⛔ خاموش"
             . ($off ? "\n\n⛔ خاموش: " . fa((string) count($off)) . ' از ' . fa((string) count(self::TOOLS)) : '');
     }
 
@@ -119,7 +119,7 @@ final class Switches
         $row  = [];
         foreach (self::TOOLS as $k => $label) {
             $on    = self::on($k);
-            $row[] = btn(($on ? '✅ ' : '⛔ ') . $label, 'tl:t:' . $k, $on ? 'success' : 'danger');
+            $row[] = btn(($on ? '' : '⛔ ') . $label, 'tl:t:' . $k, $on ? 'success' : 'danger');
             if (count($row) === 2) {
                 $rows[] = $row;
                 $row    = [];
@@ -128,7 +128,7 @@ final class Switches
         if ($row) {
             $rows[] = $row;
         }
-        $rows[] = [btn('✅ روشن‌کردن همه', 'tl:all:1', null), btn('⛔ خاموش‌کردن همه', 'tl:all:0', null)];
+        $rows[] = [btn('روشن‌کردن همه', 'tl:all:1', null), btn('⛔ خاموش‌کردن همه', 'tl:all:0', null)];
         return ikb($rows);
     }
 

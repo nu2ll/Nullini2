@@ -284,10 +284,12 @@ final class MessageHandler
                     $tg->reply($msg, "روی پیام کاربر ریپلای کن و /{$cmd} بزن،\nیا آیدی عددی یا یوزرنیمش رو بنویس:\n<code>/{$cmd} 123456</code>\n<code>/{$cmd} @username</code>");
                     return true;
                 }
+                $row = ($r && (int) $r['id'] === $tid) ? ['name' => userName($r), 'username' => $r['username'] ?? null] : Db::row('SELECT name, username FROM users WHERE id = ?', [$tid]);
+                $who = userTag($tid, (string) ($row['name'] ?? ''), $row['username'] ?? null);
                 if ($cmd === 'ban') {
-                    $tg->reply($msg, Ban::add($tid, (int) $from['id']) ? "⛔ کاربر <code>{$tid}</code> بن شد." : '🙅 ادمین رو نمی‌شه بن کرد.');
+                    $tg->reply($msg, Ban::add($tid, (int) $from['id']) ? "کاربر {$who} از ربات نالینی بن شد." : '🙅 ادمین رو نمی‌شه بن کرد.');
                 } else {
-                    $tg->reply($msg, Ban::remove($tid) ? "✅ کاربر <code>{$tid}</code> آنبن شد." : 'این کاربر بن نبود.');
+                    $tg->reply($msg, Ban::remove($tid) ? "کاربر {$who} از ربات نالینی آنبن شد." : 'این کاربر بن نبود.');
                 }
                 return true;
 

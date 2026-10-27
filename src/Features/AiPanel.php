@@ -54,7 +54,91 @@ final class AiPanel
             $on     = $cur === $id;
             $rows[] = [btn(($on ? '✅ ' : '') . $name . ' ▸', "ai:p:{$id}:0", $on ? 'success' : 'primary')];
         }
+        if (self::thinkProviders()) {
+            $rows[] = [btn('🧠 سطح فکر کردن ▸', 'ai:th', 'primary')];
+        }
         $rows[] = [btn(AI::searchOn() ? '🔎 سرچ: روشن ✅' : '🔎 سرچ: خاموش ⛔', 'ai:search', AI::searchOn() ? 'success' : null)];
+        return ikb($rows);
+    }
+
+    private static function thinkProviders(): array
+    {
+        return array_intersect_key(self::providers(), ['gemini' => 1, 'groq' => 1]);
+    }
+
+    private static function thinkCatalog(string $prov): array
+    {
+        return array_values(array_filter(self::catalog($prov), static fn($m) => !str_starts_with(substr($m['route'], strlen($prov) + 1), 'gemma')));
+    }
+
+    private static function thinkModel(string $prov, string $hash): ?array
+    {
+        foreach (self::thinkCatalog($prov) as $m) {
+            if (substr(md5($m['route']), 0, 8) === $hash) {
+                return $m + ['id' => substr($m['route'], strlen($prov) + 1)];
+            }
+        }
+        return null;
+    }
+
+    public static function thinkText(?string $prov = null, bool $list = false, ?array $model = null): string
+    {
+        $l = ['<b>🧠 سطح فکر کردن مدل</b>'];
+        if ($prov === null) {
+            foreach (self::thinkProviders() as $id => $name) {
+                $l[] = $name . ': <b>' . AI::THINK_LEVELS[AI::thinkLevel($id)] . '</b>';
+            }
+            $l[] = 'فقط روی جواب‌های چت اعمال می‌شه.';
+        } elseif ($model !== null) {
+            $raw = AI::modelThinkLevel($prov, $model['id']);
+            $l[] = bidi(h($model['name'])) . ': <b>' . ($raw === 'auto' ? 'همون تنظیم کلی' : AI::THINK_LEVELS[$raw]) . '</b>';
+            $l[] = 'این سطح فقط وقتی اعمال می‌شه که همین مدل رو ثابت انتخاب کرده باشی.';
+        } elseif ($list) {
+            $l[] = '📌 سطح هر مدل جدا' . "\n" . 'وقتی یه مدل رو ثابت انتخاب کنی (نه خودکار)، سطح خودش اعمال می‌شه؛ برای بقیه‌ی حالت‌ها تنظیم کلی.';
+        } else {
+            $l[] = (self::providers()[$prov] ?? $prov) . ': <b>' . AI::THINK_LEVELS[AI::thinkLevel($prov)] . '</b>';
+            $l[] = '⚡ روی حالت خودکار، این سطح روی همه‌ی مدل‌ها اعمال می‌شه.' . "\n" . 'هرچی بالاتر، دقیق‌تر ولی کندتر.' . "\n" . 'پیش‌فرض: همون تنظیم قبلیِ ربات.';
+        }
+        return implode("\n\n", $l);
+    }
+
+    public static function thinkKeyboard(?string $prov = null, bool $list = false, ?array $model = null): array
+    {
+        $rows = [];
+        if ($prov === null) {
+            foreach (self::thinkProviders() as $id => $name) {
+                $rows[] = [btn($name . ' · ' . AI::THINK_LEVELS[AI::thinkLevel($id)] . ' ▸', "ai:thp:{$id}", 'primary')];
+            }
+            $rows[] = [btn('🔙 برگشت', 'ai:home', null)];
+            return ikb($rows);
+        }
+        if ($list) {
+            foreach (self::thinkCatalog($prov) as $m) {
+                $raw    = AI::modelThinkLevel($prov, substr($m['route'], strlen($prov) + 1));
+                $rows[] = [btn(mb_strimwidth($m['name'], 0, 28, '…') . ' · ' . ($raw === 'auto' ? 'کلی' : AI::THINK_LEVELS[$raw]), "ai:thl:{$prov}:" . substr(md5($m['route']), 0, 8), $raw === 'auto' ? 'primary' : 'success')];
+            }
+            $rows[] = [btn('🔙 برگشت', "ai:thp:{$prov}", null)];
+            return ikb($rows);
+        }
+        $cur = $model !== null ? AI::modelThinkLevel($prov, $model['id']) : AI::thinkLevel($prov);
+        $row = [];
+        foreach (AI::THINK_LEVELS as $k => $label) {
+            $on    = $k === $cur;
+            $label = ($model !== null && $k === 'auto') ? 'تنظیم کلی' : $label;
+            $data  = $model !== null ? "ai:thv:{$prov}:" . substr(md5($model['route']), 0, 8) . ":{$k}" : "ai:ths:{$prov}:{$k}";
+            $row[] = btn(($on ? '✅ ' : '') . $label, $data, $on ? 'success' : 'primary');
+            if (count($row) === 2) {
+                $rows[] = $row;
+                $row    = [];
+            }
+        }
+        if ($row) {
+            $rows[] = $row;
+        }
+        if ($model === null) {
+            $rows[] = [btn('📌 هر مدل جدا ▸', "ai:thm:{$prov}", 'primary')];
+        }
+        $rows[] = [btn('🔙 برگشت', $model !== null ? "ai:thm:{$prov}" : 'ai:th', null)];
         return ikb($rows);
     }
 
@@ -135,6 +219,22 @@ final class AiPanel
         $known = isset(self::providers()[$prov]);
         $page  = 0;
         $saved = false;
+
+        if (in_array($act, ['th', 'thp', 'ths', 'thm', 'thl', 'thv'], true) && ($act === 'th' || isset(self::thinkProviders()[$prov]))) {
+            $model = in_array($act, ['thl', 'thv'], true) ? self::thinkModel($prov, $p[3] ?? '') : null;
+            if ($act === 'ths' && isset(AI::THINK_LEVELS[$p[3] ?? ''])) {
+                AI::setThinkLevel($prov, $p[3]);
+                $saved = true;
+            }
+            if ($act === 'thv' && $model !== null && isset(AI::THINK_LEVELS[$p[4] ?? ''])) {
+                AI::setModelThinkLevel($prov, $model['id'], $p[4]);
+                $saved = true;
+            }
+            $tp = $act === 'th' ? null : $prov;
+            $tg->editMessage($chatId, $msgId, self::thinkText($tp, $act === 'thm', $model), self::thinkKeyboard($tp, $act === 'thm', $model));
+            $tg->answer($cq, $saved ? '✅ ذخیره شد' : null);
+            return;
+        }
 
         if ($act === 'search') {
             AI::setSearch(!AI::searchOn());

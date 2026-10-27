@@ -12,7 +12,6 @@ final class FreeAI
             'openai/gpt-oss-120b',
             'openai/gpt-oss-20b',
             'qwen/qwen3.8-27b',
-            'allam-2-7b',
         ],
     ];
     private const VISION = '/scout|maverick|vision|llava|\bvl\b|qwen3\.\d/i';
@@ -288,15 +287,22 @@ final class FreeAI
             'messages'    => $msgs,
             'temperature' => $opt['temperature'] ?? 0.7,
         ];
+        if ($prov === 'groq' && ($opt['section'] ?? '') === 'chat' && ($effort = AI::groqEffort($model)) !== null) {
+            $payload['reasoning_effort'] = $effort;
+        }
         $deadline = $opt['deadline'] ?? (microtime(true) + 60);
         $wants    = $prov === 'groq' && !empty($opt['search']) && AI::searchOn();
         $search   = $wants && preg_match('/gpt-oss/i', $model) === 1;
+        $tav      = $wants && !$search && WebSearch::available() && preg_match('/qwen/i', $model) === 1;
         if ($search) {
             $payload['tools'] = [['type' => 'browser_search']];
         }
+        if ($tav) {
+            $payload['tools'] = [['type' => 'function', 'function' => WebSearch::declaration()]];
+        }
         $orig     = $payload['messages'];
         $rounds   = 0;
-        $cap      = $prov === 'groq' ? ($search ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
+        $cap      = $prov === 'groq' ? ($search || $tav ? 20 : 10) : (int) ($opt['per_try'] ?? 45);
         $url      = self::PROVIDERS[$prov]['url'] . '/chat/completions';
         $n        = count($keys);
         $start    = random_int(0, $n - 1);
@@ -309,6 +315,9 @@ final class FreeAI
                 return ['text' => null, 'kind' => 'timeout', 'seen' => $seen];
             }
             $idx = ($start + $i) % $n;
+            if ($tav && $rounds >= WebSearch::MAX_ROUNDS) {
+                $payload['tool_choice'] = 'none';
+            }
             $r   = $prov !== 'groq' && is_callable($opt['stream'] ?? null)
                 ? self::streamOnce($url, $payload, $keys[$idx], (int) max(5, min($left, 55)), $opt['stream'])
                 : Http::postJson($url, $payload, ['Authorization: Bearer ' . $keys[$idx]], (int) max(5, min($left, $cap)));
@@ -316,12 +325,24 @@ final class FreeAI
             AI::noteKey($prov, $keys[$idx], (int) $r['code']);
             if ($r['code'] === 200 && $r['data'] !== null) {
                 $msg = $r['data']['choices'][0]['message'] ?? [];
+                if ($tav && $rounds < WebSearch::MAX_ROUNDS && !empty($msg['tool_calls'])) {
+                    $rounds++;
+                    $payload['messages'][] = ['role' => 'assistant', 'content' => (string) ($msg['content'] ?? ''), 'tool_calls' => $msg['tool_calls']];
+                    foreach ((array) $msg['tool_calls'] as $tc) {
+                        $args                  = json_decode((string) ($tc['function']['arguments'] ?? ''), true);
+                        $payload['messages'][] = ['role' => 'tool', 'tool_call_id' => (string) ($tc['id'] ?? ''), 'content' => WebSearch::run((string) (is_array($args) ? ($args['query'] ?? '') : ''), $deadline)];
+                    }
+                    $i--;
+                    continue;
+                }
                 $text = self::extract($r['data']);
                 if ($text === null) {
                     logWarn('ai', "{$route}: empty reply");
                     return ['text' => null, 'kind' => 'empty', 'seen' => []];
                 }
-                AI::$sources = [];
+                if (!$tav) {
+                    AI::$sources = [];
+                }
                 foreach ((array) ($msg['executed_tools'] ?? []) as $et) {
                     foreach ((array) ($et['search_results']['results'] ?? []) as $sr) {
                         if (!empty($sr['url'])) {
@@ -334,10 +355,16 @@ final class FreeAI
             }
 
             logWarn('ai', "{$route} key{$idx} HTTP {$r['code']}: " . mb_substr((string) ($r['data']['error']['message'] ?? $r['raw']), 0, 160));
-            if ($search && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
-                unset($payload['tools']);
+            if ($r['code'] === 400 && isset($payload['reasoning_effort']) && stripos((string) $r['raw'], 'reasoning') !== false) {
+                unset($payload['reasoning_effort']);
+                $i--;
+                continue;
+            }
+            if (($search || $tav) && in_array($r['code'], [400, 429], true) && preg_match('/tool|search|browser|function/i', (string) $r['raw']) === 1) {
+                unset($payload['tools'], $payload['tool_choice']);
                 $payload['messages'] = $orig;
                 $search              = false;
+                $tav                 = false;
                 $i--;
                 continue;
             }

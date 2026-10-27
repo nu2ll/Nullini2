@@ -19,7 +19,7 @@ final class AI
 
     public const WAIT = 20;
 
-    public const BUSY_TEXT = "⏳ هر ۲۰ ثانیه فقط یه درخواست از نالینی!\nیه‌کم دیگه بیا 😅";
+    public const BUSY_TEXT = "یه‌کم دیگه بیا 😅\n⏳ هر ۲۰ ثانیه فقط یه درخواست از نالینی!";
 
     private const API = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
 
@@ -35,6 +35,76 @@ final class AI
     public static function setSearch(bool $on): void
     {
         Store::set('cfg', 'ai_search', $on ? 1 : 0);
+    }
+
+    public const THINK_LEVELS = ['auto' => 'پیش‌فرض', 'min' => 'حداقل', 'low' => 'کم', 'medium' => 'متوسط', 'high' => 'زیاد'];
+
+    public static function thinkLevel(string $prov, ?string $model = null): string
+    {
+        if ($model !== null && self::route() === $prov . ':' . $model) {
+            $m = self::modelThinkLevel($prov, $model);
+            if ($m !== 'auto') {
+                return $m;
+            }
+        }
+        $v = (string) Store::get('cfg', 'ai_think_' . $prov, 'auto');
+        return isset(self::THINK_LEVELS[$v]) ? $v : 'auto';
+    }
+
+    public static function modelThinkLevel(string $prov, string $model): string
+    {
+        $v = (string) (((array) Store::get('cfg', 'ai_think_models', []))[$prov . ':' . $model] ?? 'auto');
+        return isset(self::THINK_LEVELS[$v]) ? $v : 'auto';
+    }
+
+    public static function setModelThinkLevel(string $prov, string $model, string $level): void
+    {
+        if (!isset(self::THINK_LEVELS[$level])) {
+            return;
+        }
+        $all = (array) Store::get('cfg', 'ai_think_models', []);
+        if ($level === 'auto') {
+            unset($all[$prov . ':' . $model]);
+        } else {
+            $all[$prov . ':' . $model] = $level;
+        }
+        Store::set('cfg', 'ai_think_models', $all);
+    }
+
+    public static function setThinkLevel(string $prov, string $level): void
+    {
+        if (isset(self::THINK_LEVELS[$level])) {
+            Store::set('cfg', 'ai_think_' . $prov, $level);
+        }
+    }
+
+    public static function geminiThinking(?string $model = null): string
+    {
+        $lv = self::thinkLevel('gemini', $model);
+        return $lv === 'auto' ? 'low' : ($lv === 'min' ? 'minimal' : $lv);
+    }
+
+    private static function thinkingFor(string $model, string $level): string
+    {
+        if ($level === 'minimal' && preg_match('/^gemini-3\.[78]-flash|flash-latest$/', $model) === 1 && !str_contains($model, 'lite')) {
+            return 'low';
+        }
+        return $level;
+    }
+
+    public static function groqEffort(string $model): ?string
+    {
+        $lv = self::thinkLevel('groq', $model);
+        if ($lv === 'auto') {
+            return null;
+        }
+        if (preg_match('/gpt-oss/i', $model) === 1) {
+            return $lv === 'min' ? 'low' : $lv;
+        }
+        if (preg_match('/qwen/i', $model) === 1) {
+            return $lv === 'min' ? 'none' : $lv;
+        }
+        return null;
     }
 
     /** آخرین نتیجه‌ی هر کلید (برای /quota) */
@@ -285,7 +355,7 @@ final class AI
                     $payload['contents'] = array_merge($payload['contents'], $extra);
                 }
                 if ($thinking && !$gemma) {
-                    $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking];
+                    $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => self::thinkingFor($model, ($opt['section'] ?? '') === 'chat' ? self::geminiThinking($model) : (string) $thinking)];
                 }
                 if ($tav) {
                     // سرچ Tavily به‌صورت ابزار؛ مدل خودش تصمیم می‌گیره صداش کنه یا نه
@@ -447,10 +517,10 @@ final class AI
                     continue;
                 }
                 $r = Http::postJson(sprintf(self::API, rawurlencode($model)), [
-                    'contents'         => [['parts' => [['text' => "Read this aloud naturally, in the same language as the text:\n\n" . $text]]]],
+                    'contents'         => [['parts' => [['text' => "Read this aloud in the voice of a cute, sweet, playful young boy, in the same language as the text:\n\n" . $text]]]],
                     'generationConfig' => [
                         'responseModalities' => ['AUDIO'],
-                        'speechConfig'       => ['voiceConfig' => ['prebuiltVoiceConfig' => ['voiceName' => 'Kore']]],
+                        'speechConfig'       => ['voiceConfig' => ['prebuiltVoiceConfig' => ['voiceName' => 'Puck']]],
                     ],
                 ], ['x-goog-api-key: ' . $key], (int) max(16, min($left, 80)));
 
@@ -694,7 +764,7 @@ final class AI
             'tier'        => $opt['tier'] ?? 'smart',
             'temperature' => 0.7,
             'deadline'    => $deadline,
-            'thinking'    => 'low',
+            'thinking'    => self::geminiThinking(),
             'search'      => true,
             'section'     => 'chat',
             'stream'      => $opt['on_text'] ?? null,
@@ -738,7 +808,33 @@ final class AI
         '😂' => '🤣', '😆' => '😁', '😄' => '😁', '😃' => '😁', '😀' => '😁', '😅' => '😁', '🙂' => '😁', '😊' => '🥰', '☺' => '🥰',
         '😉' => '😘', '🥳' => '🎉', '🙌' => '👏', '💪' => '🔥', '✅' => '👌', '👋' => '🤝', '💖' => '💘', '💕' => '💘', '💗' => '💘',
         '💓' => '💘', '😔' => '😢', '😞' => '😢', '😥' => '😢', '🥹' => '😢', '😠' => '😡', '😤' => '😡', '😬' => '😨', '🤭' => '🙈',
-        '💙' => '❤', '💜' => '❤', '🖤' => '❤', '💛' => '❤', '💚' => '❤', '🧡' => '❤', '🤍' => '❤',
+        '💙' => '❤', '💜' => '❤', '🖤' => '❤', '💛' => '❤', '💚' => '❤', '🧡' => '❤', '🤍' => '❤', '😮‍💨' => '🥱', '😵‍💫' => '🥴',
+        '🤦‍♂' => '🤷‍♂', '🤦‍♀' => '🤷‍♀', '🤦' => '🤷', '💁‍♂' => '🤷‍♂', '💁‍♀' => '🤷‍♀', '💁' => '🤷', '🙋' => '🤝', '🙇' => '🙏', '🙅' => '👎',
+        '🙆' => '👌', '🙃' => '🤪', '😋' => '🤪', '😛' => '🤪', '😜' => '🤪', '😝' => '🤪', '🤑' => '🤩', '😏' => '😈', '😒' => '😐',
+        '🙄' => '🤨', '😑' => '😐', '😶' => '😐', '🫤' => '😐', '😕' => '🤨', '😟' => '😨', '🙁' => '😢', '☹' => '😢', '😣' => '😢',
+        '😖' => '😢', '😫' => '😭', '😩' => '😭', '🥺' => '😢', '😿' => '😭', '🥲' => '😢', '😪' => '😴', '😌' => '😇', '😮' => '😱',
+        '😯' => '😱', '😲' => '😱', '😳' => '😱', '🫢' => '🙈', '🫣' => '🙈', '😧' => '😨', '😦' => '😨', '😰' => '😨', '😓' => '😨',
+        '🥵' => '🤯', '🥶' => '😱', '😵' => '🥴', '🫨' => '🥴', '🫠' => '🥴', '🤒' => '🤮', '🤕' => '😢', '🤢' => '🤮', '🤧' => '🤮',
+        '😷' => '🤮', '🥸' => '🤓', '🧐' => '🤨', '🤤' => '😍', '😻' => '😍', '😽' => '😘', '😗' => '😘', '😙' => '😘', '😚' => '😘',
+        '😸' => '😁', '😹' => '🤣', '😺' => '😁', '😼' => '😈', '🙀' => '😱', '😾' => '😡', '👿' => '😈', '👹' => '😈', '👺' => '😈',
+        '💀' => '🤣', '☠' => '🤣', '🤐' => '🙊', '🤫' => '🙊', '🐵' => '🙈', '🐒' => '🙈', '🤖' => '👾', '👽' => '👾', '🛸' => '👾',
+        '🎮' => '👾', '🫶' => '💘', '🤲' => '🙏', '🤞' => '🙏', '👊' => '🔥', '✊' => '🔥', '🤛' => '🤝', '🤜' => '🤝', '✌' => '👌',
+        '🤟' => '🔥', '🤘' => '🔥', '🤙' => '👌', '☝' => '👍', '👆' => '👍', '👇' => '👎', '👐' => '🤗', '🫂' => '🤗', '🤌' => '👌',
+        '🤏' => '👌', '🖐' => '🤝', '✋' => '🤝', '🤚' => '🤝', '🖖' => '🤝', '🦾' => '🔥', '🫵' => '👀', '👁' => '👀', '👄' => '💋',
+        '👅' => '🤪', '💄' => '💅', '💃' => '🎉', '🕺' => '🎉', '🎊' => '🎉', '🎈' => '🎉', '🎁' => '🎉', '🎆' => '🎉', '🎇' => '🎉',
+        '🎂' => '🎉', '🍰' => '🎉', '🧁' => '🎉', '🥂' => '🍾', '🍻' => '🍾', '🍷' => '🍾', '🍸' => '🍾', '🥃' => '🍾', '🍺' => '🍾',
+        '💞' => '💘', '💝' => '💘', '💟' => '💘', '❣' => '❤', '💌' => '💘', '💑' => '💘', '💏' => '💘', '🩷' => '❤', '🩵' => '❤',
+        '🩶' => '❤', '🤎' => '❤', '💍' => '💘', '🌹' => '💘', '🥀' => '💔', '💥' => '🔥', '✨' => '🤩', '🌟' => '🤩', '⭐' => '🤩',
+        '💫' => '🤩', '🚀' => '🔥', '💣' => '🤯', '🧠' => '🤯', '💡' => '💯', '📈' => '💯', '🥇' => '🏆', '🥈' => '🏆', '🥉' => '🏆',
+        '🏅' => '🏆', '🎖' => '🏆', '👑' => '🏆', '💎' => '🏆', '✔' => '👌', '☑' => '👌', '❌' => '👎', '🚫' => '👎', '⛔' => '👎',
+        '❎' => '👎', '❗' => '⚡', '‼' => '⚡', '⁉' => '⚡', '❓' => '🤔', '❔' => '🤔', '💭' => '🤔', '🕯' => '🕊', '☮' => '🕊',
+        '💻' => '👨‍💻', '⌨' => '👨‍💻', '🖥' => '👨‍💻', '📝' => '✍', '🖊' => '✍', '🖋' => '✍', '📚' => '🤓', '🎓' => '🤓', '🌊' => '🐳',
+        '🐋' => '🐳', '🐬' => '🐳', '🦈' => '🐳', '🐟' => '🐳', '🐴' => '🦄', '🌈' => '🦄', '🌝' => '🌚', '🌞' => '🌚', '🌑' => '🌚',
+        '🌙' => '🌚', '🌛' => '🌚', '🌜' => '🌚', '⛄' => '☃', '❄' => '☃', '🤶' => '🎅', '🌸' => '🥰', '🌺' => '🥰', '💐' => '🥰',
+        '🌷' => '🥰', '👶' => '🥰', '🐶' => '🥰', '🐱' => '🥰', '🐰' => '🥰', '🐼' => '🥰', '🐻' => '🥰', '🦊' => '🥰', '🍒' => '🍓',
+        '🍑' => '🍓', '🍎' => '🍓', '🍉' => '🍓', '🍩' => '🍓', '🍫' => '🍓', '🍬' => '🍓', '🍭' => '🍓', '🍪' => '🍓', '🍕' => '🌭',
+        '🍔' => '🌭', '🍟' => '🌭', '🥓' => '🌭', '🌽' => '🌭', '🍆' => '🍌', '🍿' => '👀', '☀' => '😎', '🕶' => '😎', '🧊' => '🆒',
+        '🆗' => '🆒', '🆙' => '🆒', '🆓' => '🆒',
     ];
 
     private static function matchReaction(string $candidate, bool $loose = false): ?string

@@ -191,7 +191,7 @@ final class Intent
                     return null;
                 }
                 if ($t !== null && Roast::busy((int) ($msg['from']['id'] ?? 0))) {
-                    return ['text' => "⏳ هر دقیقه فقط یه روست!\nیه‌کم دیگه بیا 😅"];
+                    return ['text' => "یه‌کم دیگه بیا 😅\n⏳ هر دقیقه فقط یه روست!"];
                 }
                 if ($t === null) {
                     return ['text' => "🤷 این آدم رو پیدا نکردم؛\nآیدی عددی یا یوزرنیمش رو درست بنویس."];
