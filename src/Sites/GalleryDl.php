@@ -123,19 +123,13 @@ final class GalleryDl
 
     private static function meta(string $url): array
     {
-        $key = 'gdl_meta:' . md5($url);
-        $hit = Store::get('cache', $key);
-        if (is_array($hit) && time() - (int) ($hit['at'] ?? 0) < 1800) {
-            return (array) $hit['v'];
-        }
         $bin = self::bin();
         if ($bin === null) {
-            return ['kinds' => [], 'urls' => [], 'title' => ''];
+            return ['kinds' => [], 'urls' => [], 'title' => '', 'info' => []];
         }
         $res  = self::list($bin, self::resolve($url));
-        $meta = ['kinds' => self::kindsOf($res['out']), 'urls' => self::pinUrls($res['out']), 'title' => self::pinTitle($res['out'])];
+        $meta = ['kinds' => self::kindsOf($res['out']), 'urls' => self::pinUrls($res['out']), 'title' => self::pinTitle($res['out']), 'info' => self::pinInfo($res['out'])];
         logInfo('dl', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ' kinds=' . implode('', $meta['kinds']) . ' mp4=' . count($meta['urls']));
-        Store::set('cache', $key, ['at' => time(), 'v' => $meta]);
         return $meta;
     }
 
@@ -152,6 +146,11 @@ final class GalleryDl
     public static function title(string $url): string
     {
         return (string) self::meta($url)['title'];
+    }
+
+    public static function info(string $url): array
+    {
+        return (array) (self::meta($url)['info'] ?? []);
     }
 
     private static function pinMeta(array $row): ?array
@@ -250,11 +249,50 @@ final class GalleryDl
         $data = json_decode(trim($json), true);
         foreach (is_array($data) ? $data : [] as $row) {
             $meta = is_array($row) ? self::pinMeta($row) : null;
-            if ($meta !== null && ($t = trim((string) ($meta['title'] ?? $meta['grid_title'] ?? ''))) !== '') {
-                return mb_substr($t, 0, 200);
+            if ($meta === null) {
+                continue;
+            }
+            foreach (['title', 'grid_title', 'seo_title', 'description', 'closeup_description'] as $k) {
+                if (($t = trim((string) ($meta[$k] ?? ''))) !== '') {
+                    return mb_substr($t, 0, 200);
+                }
             }
         }
         return '';
+    }
+
+    public static function pinInfo(string $json): array
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            $meta = is_array($row) ? self::pinMeta($row) : null;
+            if ($meta === null) {
+                continue;
+            }
+            $slots = $meta['carousel_data']['carousel_slots'] ?? null;
+            $slots = is_array($slots) ? array_values($slots) : [];
+            $first = is_array($slots[0] ?? null) ? $slots[0] : [];
+            $thumb = (string) ($meta['images']['orig']['url'] ?? $first['images']['orig']['url'] ?? '');
+            $pin   = is_array($meta['pinner'] ?? null) ? $meta['pinner'] : [];
+            $who   = trim((string) ($pin['full_name'] ?? '')) ?: trim((string) ($pin['username'] ?? ''));
+            $dur   = 0;
+            if ($slots === []) {
+                foreach ((array) ($meta['videos']['video_list'] ?? []) as $v) {
+                    $dur = max($dur, (int) round((int) (is_array($v) ? ($v['duration'] ?? 0) : 0) / 1000));
+                }
+            }
+            $title = self::pinTitle($json);
+            foreach ($slots as $slot) {
+                foreach (is_array($slot) && $title === '' ? ['title', 'grid_title', 'description'] : [] as $k) {
+                    if (($t = trim((string) ($slot[$k] ?? ''))) !== '') {
+                        $title = mb_substr($t, 0, 200);
+                        break 2;
+                    }
+                }
+            }
+            return ['title' => $title, 'uploader' => mb_substr($who, 0, 80), 'thumbnail' => $thumb, 'duration' => $dur];
+        }
+        return [];
     }
 
     public static function kindsOf(string $json): array
