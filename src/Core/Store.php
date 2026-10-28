@@ -18,6 +18,26 @@ final class Store
         return $v ?? $default;
     }
 
+    public static function dayStart(): int
+    {
+        return (new DateTimeImmutable('today', new DateTimeZone('Asia/Tehran')))->getTimestamp();
+    }
+
+    public static function getToday(string $ns, string $key, $default = null)
+    {
+        $v = self::decode(Db::value('SELECT v FROM kv WHERE ns = ? AND k = ? AND updated_at >= ?', [$ns, $key, self::dayStart()]));
+        return $v ?? $default;
+    }
+
+    public static function cleanupDaily(array $namespaces): int
+    {
+        $removed = 0;
+        foreach ($namespaces as $ns) {
+            $removed += Db::run('DELETE FROM kv WHERE ns = ? AND updated_at < ?', [$ns, self::dayStart()])->rowCount();
+        }
+        return $removed;
+    }
+
     public static function set(string $ns, string $key, $value): void
     {
         Db::run(

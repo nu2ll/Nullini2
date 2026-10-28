@@ -16,14 +16,19 @@ if ($path === '/ic') {
 }
 
 if ($path === '/av') {
-    $f = '/tmp/nullini-av/' . (int) ($_GET['u'] ?? 0) . '.jpg';
-    if (!is_file($f)) {
+    require_once dirname(__DIR__) . '/src/bootstrap.php';
+    App::boot();
+    $id  = (int) ($_GET['u'] ?? 0);
+    $v   = (int) ($_GET['v'] ?? 0);
+    $sig = (string) ($_GET['s'] ?? '');
+    $img = $id > 0 && hash_equals(Whisper::avSig($id, $v), $sig) ? Whisper::avatarBytes($id) : null;
+    if ($img === null) {
         http_response_code(404);
         return true;
     }
     header('Content-Type: image/jpeg');
-    header('Cache-Control: public, max-age=86400');
-    readfile($f);
+    header('Cache-Control: public, max-age=31536000, immutable');
+    echo $img;
     return true;
 }
 

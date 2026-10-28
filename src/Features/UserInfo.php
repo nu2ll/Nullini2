@@ -147,7 +147,7 @@ final class UserInfo
         return [$text, ikb($rows)];
     }
 
-    private static function local(string|int $chatId): ?array
+    public static function local(string|int $chatId): ?array
     {
         try {
             if (is_int($chatId)) {

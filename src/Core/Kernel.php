@@ -2,14 +2,12 @@
 
 final class Kernel
 {
+    private const DAILY = ['whisper_pending', 'gw_draft', 'gw_wiz'];
+
     private const TTL = [
         'games'           => 7 * 86400,
         'calc'            => 7 * 86400,
         'owner'           => 14 * 86400,
-        'whisper'         => 30 * 86400,
-        'whisper_pending' => 86400,
-        'whisper_recent'  => 120 * 86400,
-        'whisper_group'   => 120 * 86400,
         'weather'         => 14 * 86400,
         'weather_pending' => 2 * 86400,
         'ai_memory'       => 2 * 86400,
@@ -25,8 +23,6 @@ final class Kernel
         'roast'           => 3600,
         'uname'           => 30 * 86400,
         'gw'              => 120 * 86400,
-        'gw_wiz'          => 86400,
-        'gw_draft'        => 86400,
     ];
 
     public static function handle(array $update): void
@@ -67,10 +63,23 @@ final class Kernel
         App::useBot(0);
     }
 
+    public static function dailyCleanup(): void
+    {
+        try {
+            $removed = Store::cleanupDaily(self::DAILY);
+        } catch (\Throwable $e) {
+            logError('daily', $e->getMessage());
+            return;
+        }
+        if ($removed > 0) {
+            logInfo('daily', "removed {$removed} drafts");
+        }
+    }
+
     public static function janitor(): void
     {
         try {
-            $removed = Store::cleanup(self::TTL);
+            $removed = Store::cleanup(self::TTL) + Store::cleanupDaily(self::DAILY);
             Users::cleanupStats();
             Giveaway::janitor();
         } catch (\Throwable $e) {

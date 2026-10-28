@@ -3,48 +3,137 @@
 final class Whisper
 {
     public const MAX_LEN = 200;
-    public const AV_DIR  = '/tmp/nullini-av';
+
+    private static function key(): string
+    {
+        return hash('sha256', 'nullini-whisper|' . (string) env('WHISPER_KEY', App::tokens()[0] ?? ''), true);
+    }
+
+    private static function seal(string $text): string
+    {
+        if ($text === '') {
+            return '';
+        }
+        $iv  = random_bytes(12);
+        $tag = '';
+        $ct  = openssl_encrypt($text, 'aes-256-gcm', self::key(), OPENSSL_RAW_DATA, $iv, $tag);
+        return $ct === false ? $text : 'enc:' . base64_encode($iv . $tag . $ct);
+    }
+
+    private static function open(string $text): string
+    {
+        if (!str_starts_with($text, 'enc:')) {
+            return $text;
+        }
+        $raw = base64_decode(substr($text, 4), true);
+        if ($raw === false || strlen($raw) < 29) {
+            return '';
+        }
+        $pt = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', self::key(), OPENSSL_RAW_DATA, substr($raw, 0, 12), substr($raw, 12, 16));
+        return $pt === false ? '' : $pt;
+    }
+
+    public static function avSig(int $id, int $v): string
+    {
+        return substr(hash_hmac('sha256', $id . '|' . $v, (string) (App::tokens()[0] ?? '')), 0, 16);
+    }
+
+    public static function avatarBytes(int $id): ?string
+    {
+        $r = Store::get('whisper_av', (string) $id);
+        $b = is_array($r) && !empty($r['b']) ? base64_decode((string) $r['b'], true) : false;
+        return $b !== false && strlen($b) >= 100 ? $b : null;
+    }
 
     public static function avatarUrl(int $id): ?string
     {
-        $f = self::AV_DIR . '/' . $id . '.jpg';
         $u = App::publicUrl();
-        if ($id <= 0 || $u === '' || !is_file($f) || filesize($f) < 100) {
+        if ($id <= 0 || $u === '') {
             return null;
         }
-        return $u . '/av?u=' . $id . '&v=' . filemtime($f);
+        $r = Store::get('whisper_av', (string) $id);
+        if (!is_array($r) || empty($r['b'])) {
+            return null;
+        }
+        $v = (int) ($r['at'] ?? 0);
+        return $u . '/av?u=' . $id . '&v=' . $v . '&s=' . self::avSig($id, $v);
     }
 
-    public static function cacheAvatar(int $id): void
+    public static function refreshAvatar(int $id): void
     {
-        $f = self::AV_DIR . '/' . $id . '.jpg';
-        if ($id <= 0 || (is_file($f) && time() - filemtime($f) < 86400) || Store::get('cache', 'av_none_' . $id) !== null) {
+        if ($id <= 0) {
             return;
         }
-        $r   = App::tg()->call('getUserProfilePhotos', ['user_id' => $id, 'limit' => 1], 8);
-        $fid = $r['result']['photos'][0][0]['file_id'] ?? null;
-        $img = $fid ? App::tg()->download($fid) : null;
+        $res = App::tg()->call('getUserProfilePhotos', ['user_id' => $id, 'limit' => 1], 6);
+        if (empty($res['ok'])) {
+            return;
+        }
+        $ph  = $res['result']['photos'][0][0] ?? null;
+        $old = Store::get('whisper_av', (string) $id);
+        $old = is_array($old) ? $old : [];
+        if ($ph === null) {
+            if (!empty($old['b'])) {
+                Store::set('whisper_av', (string) $id, ['u' => null, 'at' => time()]);
+            }
+            return;
+        }
+        $uid = (string) ($ph['file_unique_id'] ?? $ph['file_id']);
+        if (($old['u'] ?? null) === $uid && !empty($old['b'])) {
+            return;
+        }
+        $img = App::tg()->download($ph['file_id']);
         if ($img === null || strlen($img) < 100) {
-            Store::set('cache', 'av_none_' . $id, time());
             return;
         }
-        @mkdir(self::AV_DIR, 0775, true);
-        @file_put_contents($f, $img);
+        Store::set('whisper_av', (string) $id, ['u' => $uid, 'b' => base64_encode($img), 'at' => time()]);
+    }
+
+    public static function prefetch(array $tokens): void
+    {
+        $calls = [];
+        foreach ($tokens as $t) {
+            $target = null;
+            if (preg_match('/^@([A-Za-z0-9_]{3,32})$/', $t, $m)) {
+                $target = '@' . $m[1];
+            } elseif (preg_match('/^\d{5,15}$/', $t)) {
+                $target = (int) $t;
+            }
+            if ($target === null) {
+                continue;
+            }
+            $row = UserInfo::local($target);
+            $cid = $row['id'] ?? $target;
+            $key = 'chat_' . mb_strtolower((string) $cid);
+            $hit = Store::get('cache', $key);
+            if (is_array($hit) && isset($hit['at']) && time() - $hit['at'] < 3600) {
+                continue;
+            }
+            $calls[$key] = ['chat_id' => $cid];
+        }
+        if ($calls === []) {
+            return;
+        }
+        foreach (App::tg()->multi('getChat', $calls, 8) as $key => $r) {
+            if (!empty($r['ok'])) {
+                Store::set('cache', $key, ['at' => time(), 'v' => $r['result']]);
+            }
+        }
     }
 
     public static function pendingKeyboard(string $token = '', bool $multi = false): array
     {
         $show = $token === '' ? 'wh:show' : 'wh:show:' . $token;
         if ($multi) {
-            return self::seenKeyboard($show);
+            return self::seenKeyboard($show, $token);
         }
         return ikb([[btn('💬 نمایش', $show)]]);
     }
 
-    public static function seenKeyboard(string $show = 'wh:show'): array
+    public static function seenKeyboard(string $show = 'wh:show', string $ref = ''): array
     {
+        $sfx = $ref === '' ? '' : ':' . $ref;
         return ikb([
-            [btn('🗑 حذف', 'wh:del', 'danger'), btn('💬 نمایش', $show), btn('📊 آمار', 'wh:stats', 'success')],
+            [btn('🗑 حذف', 'wh:del' . $sfx, 'danger'), btn('💬 نمایش', $show), btn('📊 آمار', 'wh:stats' . $sfx, 'success')],
             [self::switchBtn('↪️ پاسخ', 'nj ', null)],
         ]);
     }
@@ -134,10 +223,10 @@ final class Whisper
             $l = is_array($l) ? $l : [];
             $l = array_values(array_filter($l, static fn($x) => !self::same($x, $r)));
             array_unshift($l, $r);
-            return array_slice($l, 0, 8);
+            return array_slice($l, 0, 48);
         });
         if (!empty($r['id'])) {
-            self::cacheAvatar((int) $r['id']);
+            self::refreshAvatar((int) $r['id']);
         }
     }
 
@@ -182,44 +271,67 @@ final class Whisper
         return '📭 نجوای ' . implode('، ', $names) . ' مشاهده شد (' . fa(count($readers)) . ' از ' . fa(count($rs)) . ') 🔹';
     }
 
-    public static function draft(array $from, string $text, array $recipients): string
+    public static function draft(array $from, string $text, array $opts): string
     {
-        $token = bin2hex(random_bytes(8));
-        $first = $recipients[0] ?? ['id' => null, 'username' => null, 'name' => ''];
+        $opts  = array_values($opts);
+        $token = substr(md5((int) $from['id'] . '|' . $text . '|' . json_encode($opts)), 0, 16);
         Store::set('whisper_pending', $token, [
-            'sender_id'          => (int) $from['id'],
-            'sender_name'        => userName($from),
-            'recipient_id'       => $first['id'],
-            'recipient_username' => $first['username'],
-            'recipient_name'     => $first['name'],
-            'recipients'         => array_values($recipients),
-            'text'               => $text,
+            'sender_id'   => (int) $from['id'],
+            'sender_name' => userName($from),
+            'text'        => self::seal($text),
+            'opts'        => $opts,
         ]);
         return $token;
     }
 
-    public static function bind(string $token, string $imid): void
+    public static function bind(string $ref, string $imid): void
     {
-        $p = Store::get('whisper_pending', $token);
+        if (!preg_match('/^([a-f0-9]{16})(?:_(\d{1,2}))?$/', $ref, $m)) {
+            return;
+        }
+        $p = Store::getToday('whisper_pending', $m[1]);
         if (!is_array($p)) {
             return;
         }
-        Store::set('whisper', $imid, $p + ['seen' => 0, 'revealed' => false, 'snoopers' => [], 'deleted' => false]);
-        Store::delete('whisper_pending', $token);
-        $rs = self::recipients($p);
+        $rs = $p['opts'][(int) ($m[2] ?? 0)] ?? self::recipients($p);
+        foreach ($rs as $i => $r) {
+            if (empty($r['id']) && !empty($r['username'])) {
+                $row = UserInfo::local('@' . $r['username']);
+                if (!empty($row['id'])) {
+                    $rs[$i]['id'] = (int) $row['id'];
+                }
+            }
+        }
+        $rs    = array_values($rs);
+        $first = $rs[0] ?? ['id' => null, 'username' => null, 'name' => ''];
+        Store::set('whisper', $imid, [
+            'sender_id'          => (int) $p['sender_id'],
+            'sender_name'        => $p['sender_name'] ?? '',
+            'recipient_id'       => $first['id'] ?? null,
+            'recipient_username' => $first['username'] ?? null,
+            'recipient_name'     => $first['name'] ?? '',
+            'recipients'         => $rs,
+            'text'               => $p['text'],
+            'seen' => 0, 'revealed' => false, 'snoopers' => [], 'deleted' => false,
+        ]);
+        Store::delete('whisper_pending', $m[1]);
         foreach ($rs as $r) {
             self::addRecent((int) $p['sender_id'], $r);
         }
         if (count($rs) > 1) {
             Store::set('whisper_group', (string) $p['sender_id'], $rs);
         }
+        self::refreshAvatar((int) $p['sender_id']);
     }
 
     private static function isRecipient(array $w, array $from): bool
     {
         foreach (self::recipients($w) as $r) {
-            if (!empty($r['id']) && (int) $from['id'] === (int) $r['id']) {
-                return true;
+            if (!empty($r['id'])) {
+                if ((int) $from['id'] === (int) $r['id']) {
+                    return true;
+                }
+                continue;
             }
             if (!empty($r['username']) && !empty($from['username']) && strcasecmp($from['username'], $r['username']) === 0) {
                 return true;
@@ -230,13 +342,19 @@ final class Whisper
 
     public static function onCallback(array $cq, string $data, string $imid): void
     {
+        self::dispatch($cq, $data, $imid);
+        self::refreshAvatar((int) ($cq['from']['id'] ?? 0));
+    }
+
+    private static function dispatch(array $cq, string $data, string $imid): void
+    {
         $tg   = App::tg();
         $from = $cq['from'];
         $w    = Store::get('whisper', $imid);
-        if (preg_match('/^wh:show:([a-f0-9]{16})$/', $data, $m)) {
-            $data = 'wh:show';
+        if (preg_match('/^wh:(show|del|stats):([a-f0-9]{16}(?:_\d{1,2})?)$/', $data, $m)) {
+            $data = 'wh:' . $m[1];
             if (!is_array($w)) {
-                self::bind($m[1], $imid);
+                self::bind($m[2], $imid);
                 $w = Store::get('whisper', $imid);
             }
         }
@@ -267,7 +385,7 @@ final class Whisper
                     return;
                 }
 
-                $wt = mb_substr((string) $w['text'], 0, self::MAX_LEN);
+                $wt = mb_substr(self::open((string) $w['text']), 0, self::MAX_LEN);
                 $tg->alert($cq, mb_strlen($wt) <= self::MAX_LEN - 3 ? '🤫 ' . $wt : $wt);
 
                 if ($isRecipient) {
@@ -277,6 +395,13 @@ final class Whisper
                         if (!is_array($s)) {
                             return null;
                         }
+                        $rs = self::recipients($s);
+                        foreach ($rs as $i => $r) {
+                            if (empty($r['id']) && !empty($r['username']) && !empty($from['username']) && strcasecmp($from['username'], $r['username']) === 0) {
+                                $rs[$i]['id'] = (int) $from['id'];
+                            }
+                        }
+                        $s['recipients']  = $rs;
                         $s['seen']        = (int) ($s['seen'] ?? 0) + 1;
                         $s['revealed']    = true;
                         $s['readers'][$k] = userName($from);

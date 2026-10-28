@@ -143,7 +143,7 @@ final class Giveaway
 
     public static function fromDraft(string $id, string $imid, array $from): ?array
     {
-        $d = Store::get('gw_draft', $id);
+        $d = Store::getToday('gw_draft', $id);
         if (!is_array($d) || (int) $d['owner'] !== (int) ($from['id'] ?? 0)) {
             return null;
         }
@@ -221,7 +221,7 @@ final class Giveaway
 
     public static function active(int $uid): bool
     {
-        return is_array(Store::get('gw_wiz', (string) $uid));
+        return is_array(Store::getToday('gw_wiz', (string) $uid));
     }
 
     public static function cancel(array $msg): void
@@ -229,7 +229,7 @@ final class Giveaway
         $tg   = App::tg();
         $uid  = (int) $msg['from']['id'];
         $chat = $msg['chat']['id'];
-        $w    = Store::get('gw_wiz', (string) $uid);
+        $w    = Store::getToday('gw_wiz', (string) $uid);
         $mid  = is_array($w) ? (int) ($w['m'] ?? 0) : 0;
         self::clear($uid);
         $text = '👌 ساخت قرعه‌کشی لغو شد.';
@@ -246,7 +246,7 @@ final class Giveaway
         $tg   = App::tg();
         $uid  = (int) $msg['from']['id'];
         $chat = $msg['chat']['id'];
-        $w    = Store::get('gw_wiz', (string) $uid);
+        $w    = Store::getToday('gw_wiz', (string) $uid);
         if (!is_array($w)) {
             return false;
         }
@@ -369,7 +369,7 @@ final class Giveaway
 
     private static function askPrize(int|string $chat, int $uid, array $t): void
     {
-        $old = Store::get('gw_wiz', (string) $uid);
+        $old = Store::getToday('gw_wiz', (string) $uid);
         if (is_array($old)) {
             foreach (['m', 'k'] as $f) {
                 if (!empty($old[$f])) {
@@ -409,7 +409,7 @@ final class Giveaway
 
     private static function setWinners(int $uid, int|string $chat, int $mid, int $n): void
     {
-        $w = Store::get('gw_wiz', (string) $uid);
+        $w = Store::getToday('gw_wiz', (string) $uid);
         if (!is_array($w) || !in_array($w['step'], ['winners', 'time'], true)) {
             return;
         }
@@ -535,7 +535,7 @@ final class Giveaway
             return;
         }
         if ($data === 'gw:x') {
-            $w = Store::get('gw_wiz', (string) $uid);
+            $w = Store::getToday('gw_wiz', (string) $uid);
             self::clear($uid);
             if ($chat !== null) {
                 self::dropKeyboard($chat, $w);
@@ -550,7 +550,7 @@ final class Giveaway
             return;
         }
         if (preg_match('/^gw:t:(\d+)$/', $data, $m)) {
-            $w = Store::get('gw_wiz', (string) $uid);
+            $w = Store::getToday('gw_wiz', (string) $uid);
             if (!is_array($w) || $w['step'] !== 'time') {
                 $tg->alert($cq, '⌛️ این مرحله منقضی شده؛' . "\n" . 'دوباره /giveaway بزن.');
                 return;
@@ -579,7 +579,7 @@ final class Giveaway
         $imid = $cq['inline_message_id'] ?? null;
         $g    = Store::get('gw', $id);
         if (!is_array($g) && $imid) {
-            $d = Store::get('gw_draft', $id);
+            $d = Store::getToday('gw_draft', $id);
             $g = is_array($d) ? self::fromDraft($id, $imid, ['id' => $d['owner']]) : null;
         }
         if (!is_array($g)) {
@@ -645,7 +645,7 @@ final class Giveaway
     private static function publish(array $cq, int $uid, int|string $chat, int $mid): void
     {
         $tg = App::tg();
-        $w  = Store::get('gw_wiz', (string) $uid);
+        $w  = Store::getToday('gw_wiz', (string) $uid);
         if (!is_array($w) || $w['step'] !== 'confirm') {
             $tg->alert($cq, '⌛️ منقضی شده؛' . "\n" . 'دوباره /giveaway بزن.');
             return;

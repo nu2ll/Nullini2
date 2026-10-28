@@ -479,6 +479,7 @@ if ($mode === 'fork' && !disabled('pcntl_signal')) {
 }
 $lastTick    = 0.0;
 $lastJanitor = 0;
+$lastDay     = Store::dayStart();
 $errors      = 0;
 $sync        = Backup::enabled();
 $syncPid     = -1;
@@ -496,6 +497,10 @@ while ($running) {
     if (microtime(true) - $lastTick >= 1.0) {
         Kernel::tick();
         $lastTick = microtime(true);
+    }
+    if (Store::dayStart() !== $lastDay) {
+        $lastDay = Store::dayStart();
+        background(static fn() => Kernel::dailyCleanup(), $mode, $children, 120);
     }
     if (time() - $lastJanitor >= 3600) {
         $lastJanitor = time();
