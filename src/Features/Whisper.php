@@ -373,15 +373,27 @@ final class Whisper
                     return;
                 }
                 if (!$isSender && !$isRecipient) {
-                    Store::update('whisper', $imid, static function ($s) use ($from) {
+                    $upd = Store::update('whisper', $imid, static function ($s) use ($from) {
                         if (!is_array($s)) {
                             return null;
                         }
                         $k                   = (string) $from['id'];
+                        $first               = !isset($s['snoopers'][$k]);
                         $s['snoopers'][$k] = ['name' => userName($from), 'count' => (int) ($s['snoopers'][$k]['count'] ?? 0) + 1];
+                        $s['snoop_new']      = $first;
                         return $s;
                     });
-                    $tg->alert($cq, '🙅 این نجوا مال تو نیست؛' . "\n" . 'فضولیت ثبت شد 😏');
+                    $tg->answer($cq);
+                    if (is_array($upd) && !empty($upd['snoop_new'])) {
+                        $multi = count(self::recipients($upd)) > 1;
+                        $seen  = !empty($upd['revealed']) || $multi;
+                        $base  = $seen ? self::seenText($upd) : self::pendingText($upd);
+                        $tg->editInline(
+                            $imid,
+                            $base . "\n🙅 " . userTag((int) $from['id'], userName($from), $from['username'] ?? null) . ' این نجوا مال تو نیست؛ فضولیت ثبت شد 😏',
+                            $seen ? self::seenKeyboard() : self::pendingKeyboard()
+                        );
+                    }
                     return;
                 }
 

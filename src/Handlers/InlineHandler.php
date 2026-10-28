@@ -265,8 +265,13 @@ final class InlineHandler
                     $to[] = $r;
                 }
             }
+            foreach (array_slice($to, 0, 3) as $r) {
+                if (!empty($r['id']) && Whisper::avatarUrl((int) $r['id']) === null) {
+                    Whisper::refreshAvatar((int) $r['id']);
+                }
+            }
             $token = $text === '' ? null : Whisper::draft($from, $text, [$to]);
-            self::answer([self::whisperItem($text, $to, $token, 0)]);
+            self::answer([self::whisperItem($text, $to, $token, 0, count($tokens) === 1 ? $tokens[0] : null, $len)]);
             return;
         }
         $uid  = (int) $from['id'];
@@ -295,20 +300,27 @@ final class InlineHandler
 
     private static function whisperGuide(bool $bare, int $len): array
     {
-        if ($bare) {
-            $desc = 'nj [متن] [@یوزرنیم] [آیدی]';
-        } else {
-            $desc = ($len === 0 ? '⚠️ متن نجوا رو بنویس' : '⚠️ آیدی کاربر گیرنده رو وارد کن') . "\n" . fa($len) . ' از ' . fa(Whisper::MAX_LEN);
+        $desc = 'nj [متن] [@یوزرنیم] [آیدی]';
+        if (!$bare) {
+            $desc .= "\n" . fa($len) . ' از ' . fa(Whisper::MAX_LEN);
         }
         return Ui::article('help_whisper', 'chat', '🤫 نجوا', $desc, Ui::guide('whisper'), Ui::tryKeyboard('whisper'));
     }
 
-    private static function whisperItem(string $text, array $to, ?string $token, int $idx): array
+    private static function whisperItem(string $text, array $to, ?string $token, int $idx, ?string $rawTo = null, ?int $len = null): array
     {
         $names = array_map(static fn($r) => ($r['name'] ?? '') !== '' ? $r['name'] : '@' . ($r['username'] ?? ''), $to);
         $multi = count($to) > 1;
         $title = $multi ? 'نجوای چندنفره (' . fa(count($to)) . ' نفر)' : $names[0];
         $desc  = $multi ? "👥 نجوای چندنفره\n" . mb_substr(implode(' & ', $names), 0, 80) : '💬 نجوا';
+        if ($rawTo !== null && !$multi) {
+            $isUser = str_starts_with($rawTo, '@');
+            $title  = $isUser ? 'نجوا به ' . $rawTo : 'نجوا به (👤کاربر)';
+            $desc   = '💬 ' . ($isUser ? 'نجوا با آیدی' : 'نجوا با آیدی‌عددی') . ' ✅';
+            if ($len !== null) {
+                $desc .= "\n" . fa($len) . ' از ' . fa(Whisper::MAX_LEN);
+            }
+        }
         $icon  = $multi ? 'group' : ((($av = Whisper::avatarUrl((int) ($to[0]['id'] ?? 0))) !== null) ? $av : 'info');
         if ($text === '' || $token === null) {
             return Ui::article('whe_' . substr(md5(json_encode($to)), 0, 16), $icon, $title, $desc, Whisper::emptyText(), Whisper::emptyKeyboard());
