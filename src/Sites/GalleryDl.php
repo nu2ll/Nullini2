@@ -139,8 +139,47 @@ final class GalleryDl
         return $kind;
     }
 
+    private static function pinMeta(array $row): ?array
+    {
+        $meta = ($row[0] ?? null) === 2 ? ($row[1] ?? null) : (($row[0] ?? null) === 3 ? ($row[2] ?? null) : null);
+        return is_array($meta) ? $meta : null;
+    }
+
+    private static function hasVideoList(mixed $node): bool
+    {
+        return is_array($node) && is_array($node['videos']['video_list'] ?? null) && $node['videos']['video_list'] !== [];
+    }
+
+    public static function pinKinds(string $json): array
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            $meta = is_array($row) ? self::pinMeta($row) : null;
+            if ($meta === null) {
+                continue;
+            }
+            $slots = $meta['carousel_data']['carousel_slots'] ?? null;
+            if (is_array($slots) && $slots !== []) {
+                $out = [];
+                foreach ($slots as $slot) {
+                    if (is_array($slot)) {
+                        $out[] = self::hasVideoList($slot) ? 'v' : 'p';
+                    }
+                }
+                return in_array('v', $out, true) ? array_slice($out, 0, self::MAX) : [];
+            }
+            if (self::hasVideoList($meta)) {
+                return ['v'];
+            }
+        }
+        return [];
+    }
+
     public static function kindsOf(string $json): array
     {
+        if (($pin = self::pinKinds($json)) !== []) {
+            return $pin;
+        }
         $data = json_decode(trim($json), true);
         $out  = [];
         foreach (is_array($data) ? $data : [] as $row) {
@@ -159,14 +198,14 @@ final class GalleryDl
         return array_slice($out, 0, self::MAX);
     }
 
-    public static function download(string $url, string $dir, int $timeout, int $limit, int $max = self::MAX, bool $photosOnly = false): array
+    public static function download(string $url, string $dir, int $timeout, int $limit, int $max = self::MAX, bool $photosOnly = false, ?string $range = null): array
     {
         $bin = self::bin();
         if ($bin === null) {
             logWarn('dl', 'gallery-dl not found, album download disabled');
             return ['code' => -1, 'out' => '', 'err' => 'gallery-dl not found'];
         }
-        $args = [$bin, '--config-ignore', '-D', $dir, '-f', '{num:>02}_{filename}.{extension}', '--range', '1-' . $max, '--filesize-max', max(1, (int) ($limit / 1048576)) . 'M', '-o', 'timeout=20'];
+        $args = [$bin, '--config-ignore', '-D', $dir, '-f', '{num:>02}_{filename}.{extension}', '--range', $range ?? '1-' . $max, '--filesize-max', max(1, (int) ($limit / 1048576)) . 'M', '-o', 'timeout=20'];
         if ($photosOnly) {
             array_push($args, '--filter', "extension in ('jpg', 'jpeg', 'png', 'webp', 'avif', 'heic', 'heif')");
         }
@@ -214,7 +253,7 @@ final class GalleryDl
     public static function parse(string $json): array
     {
         $data = json_decode(trim($json), true);
-        if (!is_array($data)) {
+        if (!is_array($data) || in_array('v', self::pinKinds($json), true)) {
             return [];
         }
         $urls = [];

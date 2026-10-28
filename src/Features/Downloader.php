@@ -830,7 +830,13 @@ final class Downloader
         $res   = ['code' => 1, 'out' => '', 'err' => ''];
         if (GalleryDl::supports((string) $job['site'])) {
             if ($kinds === [] || in_array('p', $kinds, true)) {
-                $res = GalleryDl::download($url, $dir, self::jobTime() - 60, $limit, self::ALBUM_MAX, true);
+                $pp = [];
+                foreach (array_values($kinds) as $i => $k) {
+                    if ($k === 'p') {
+                        $pp[] = $i + 1;
+                    }
+                }
+                $res = GalleryDl::download($url, $dir, self::jobTime() - 60, $limit, self::ALBUM_MAX, true, $pp !== [] ? implode(',', $pp) : null);
                 logInfo('dl', "{$job['site']} album photos via gallery-dl: files=" . count(self::albumFiles($dir)));
             }
             if ($kinds === [] || in_array('v', $kinds, true)) {

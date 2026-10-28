@@ -282,6 +282,13 @@ check('gdl ytdl prefix', GalleryDl::parse((string) json_encode([[3, 'ytdl:https:
 check('gdl ext from url', GalleryDl::parse((string) json_encode([[3, 'https://i.pinimg.com/originals/a/1.jpg', []]])), [['https://i.pinimg.com/originals/a/1.jpg']]);
 check('gdl gif left to ytdlp', GalleryDl::parse((string) json_encode([[3, 'https://cdn.x/a.gif', ['extension' => 'gif']]])), []);
 check('gdl kinds gif is video', GalleryDl::kindsOf((string) json_encode([[3, 'https://cdn.x/a.gif', ['extension' => 'gif']]])), ['v']);
+$pv = [[2, ['videos' => ['video_list' => ['V_HLSV4' => ['url' => 'https://v1.pinimg.com/a.m3u8'], 'V_720P' => ['url' => 'https://v1.pinimg.com/a_720w.mp4']]]]], [3, 'https://i.pinimg.com/originals/a/1.jpg', ['extension' => 'jpg']]];
+check('pin animated is video', GalleryDl::kindsOf((string) json_encode($pv)), ['v']);
+check('pin animated left to ytdlp', GalleryDl::parse((string) json_encode($pv)), []);
+$ps = [[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg', 'videos' => ['video_list' => ['V_720P' => ['url' => 'https://v1.pinimg.com/1.mp4']]]], ['url' => 'https://i.pinimg.com/originals/b/2.jpg', 'videos' => null]]]]]];
+check('pin carousel kinds', GalleryDl::pinKinds((string) json_encode($ps)), ['v', 'p']);
+check('pin plain image', GalleryDl::pinKinds((string) json_encode([[2, ['videos' => null]]])), []);
+check('pin images only carousel', GalleryDl::pinKinds((string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg']]]]]])), []);
 check('gdl garbage', GalleryDl::parse('not json'), []);
 check('gdl queued', GalleryDl::queued((string) json_encode([[6, 'https://www.pinterest.com/pin/123/', []]])), 'https://www.pinterest.com/pin/123/');
 check('gdl no queue', GalleryDl::queued('[]'), null);
