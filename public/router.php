@@ -15,6 +15,18 @@ if ($path === '/ic') {
     return true;
 }
 
+if ($path === '/av') {
+    $f = '/tmp/nullini-av/' . (int) ($_GET['u'] ?? 0) . '.jpg';
+    if (!is_file($f)) {
+        http_response_code(404);
+        return true;
+    }
+    header('Content-Type: image/jpeg');
+    header('Cache-Control: public, max-age=86400');
+    readfile($f);
+    return true;
+}
+
 if ($path === '/health') {
     header('Content-Type: text/plain');
     echo 'ok';

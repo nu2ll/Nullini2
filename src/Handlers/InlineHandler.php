@@ -267,7 +267,7 @@ final class InlineHandler
             return;
         }
         $uid     = (int) $from['id'];
-        $results = [Ui::article('help_whisper', 'whisper', '🤫 نجوا', '⚠️ آیدی کاربر گیرنده رو وارد کن', Ui::guide('whisper'), Ui::tryKeyboard('whisper'))];
+        $results = [Ui::article('help_whisper', 'chat', '🤫 نجوا', 'nj [متن] [@یوزرنیم] [آیدی]', Ui::guide('whisper'), Ui::tryKeyboard('whisper'))];
         foreach (array_slice(Whisper::recent($uid), 0, 5) as $r) {
             $results[] = self::whisperItem($text, [$r]);
         }
@@ -286,15 +286,17 @@ final class InlineHandler
         $names = array_map(static fn($r) => ($r['name'] ?? '') !== '' ? $r['name'] : '@' . ($r['username'] ?? ''), $to);
         $multi = count($to) > 1;
         $title = $multi ? 'نجوای چندنفره (' . fa(count($to)) . ' نفر)' : $names[0];
+        $desc  = $multi ? 'نجوای چندنفره 👥' : 'نجوا 💬';
+        $icon  = $multi ? 'group' : ((($av = Whisper::avatarUrl((int) ($to[0]['id'] ?? 0))) !== null) ? $av : 'info');
         if ($text === '') {
-            return Ui::article('whe_' . substr(md5(json_encode($to)), 0, 16), 'whisper', $title, $multi ? implode(' & ', $names) : '💬 نجوا', Whisper::emptyText(), Whisper::emptyKeyboard());
+            return Ui::article('whe_' . substr(md5(json_encode($to)), 0, 16), $icon, $title, $desc, Whisper::emptyText(), Whisper::emptyKeyboard());
         }
         $token = Whisper::draft(self::$iq['from'], $text, $to);
         return Ui::article(
             "wh_{$token}",
-            'whisper',
+            $icon,
             $title,
-            ($multi ? implode(' & ', $names) . ' · ' : '') . '🔒 ' . mb_substr($text, 0, 50),
+            $desc,
             Whisper::pendingText(['recipients' => $to]),
             Whisper::pendingKeyboard($token, $multi)
         );

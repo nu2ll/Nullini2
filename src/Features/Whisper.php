@@ -3,24 +3,49 @@
 final class Whisper
 {
     public const MAX_LEN = 200;
+    public const AV_DIR  = '/tmp/nullini-av';
+
+    public static function avatarUrl(int $id): ?string
+    {
+        $f = self::AV_DIR . '/' . $id . '.jpg';
+        $u = App::publicUrl();
+        if ($id <= 0 || $u === '' || !is_file($f) || filesize($f) < 100) {
+            return null;
+        }
+        return $u . '/av?u=' . $id . '&v=' . filemtime($f);
+    }
+
+    public static function cacheAvatar(int $id): void
+    {
+        $f = self::AV_DIR . '/' . $id . '.jpg';
+        if ($id <= 0 || (is_file($f) && time() - filemtime($f) < 86400) || Store::get('cache', 'av_none_' . $id) !== null) {
+            return;
+        }
+        $r   = App::tg()->call('getUserProfilePhotos', ['user_id' => $id, 'limit' => 1], 8);
+        $fid = $r['result']['photos'][0][0]['file_id'] ?? null;
+        $img = $fid ? App::tg()->download($fid) : null;
+        if ($img === null || strlen($img) < 100) {
+            Store::set('cache', 'av_none_' . $id, time());
+            return;
+        }
+        @mkdir(self::AV_DIR, 0775, true);
+        @file_put_contents($f, $img);
+    }
 
     public static function pendingKeyboard(string $token = '', bool $multi = false): array
     {
         $show = $token === '' ? 'wh:show' : 'wh:show:' . $token;
         if ($multi) {
-            return ikb([
-                [btn('👁 نمایش', $show), btn('📊 آمار', 'wh:stats', 'success'), btn('🗑 حذف', 'wh:del', 'danger')],
-                [self::switchBtn('↪️ پاسخ', 'nj ')],
-            ]);
+            return self::seenKeyboard($show);
         }
-        return ikb([[btn('👁 نمایش نجوا', $show)]]);
+        return ikb([[btn('💬 نمایش', $show)]]);
     }
 
-    public static function seenKeyboard(): array
+    public static function seenKeyboard(string $show = 'wh:show'): array
     {
         return ikb([
-            [btn('👁 نمایش', 'wh:show'), btn('📊 آمار', 'wh:stats', 'success'), btn('🗑 حذف', 'wh:del', 'danger')],
-            [self::switchBtn('↪️ پاسخ', 'nj ')],
+            [btn('🗑 حذف', 'wh:del', 'danger'), btn('💬 نمایش', $show), btn('📊 آمار', 'wh:stats', 'success')],
+            [self::switchBtn('↪️ پاسخ', 'nj ', null)],
         ]);
     }
 
@@ -52,7 +77,7 @@ final class Whisper
             '📨 درخواست نجوا',
             '🆔 آیدی عددی من: ' . $id,
             '🆔 آیدی عددی من: <code>' . $id . "</code>\n\n👇 برای نجوا به من دکمه زیر رو بزن",
-            ikb([[self::switchBtn('ارسال به ' . mb_substr(userName($from), 0, 24), 'nj ' . $id . ' ')]])
+            ikb([[self::switchBtn('ارسال به ' . mb_substr(userName($from), 0, 24), 'nj ' . $id . ' ', null)]])
         );
     }
 
@@ -111,6 +136,9 @@ final class Whisper
             array_unshift($l, $r);
             return array_slice($l, 0, 8);
         });
+        if (!empty($r['id'])) {
+            self::cacheAvatar((int) $r['id']);
+        }
     }
 
     public static function deletedKeyboard(): array
@@ -144,14 +172,14 @@ final class Whisper
     {
         $rs = self::recipients($w);
         if (count($rs) <= 1) {
-            return '🟢 نجوای ' . self::mention($w) . ' مشاهده شد';
+            return '📭 نجوای ' . self::mention($w) . ' مشاهده شد 🔹';
         }
         $readers = (array) ($w['readers'] ?? []);
         $names   = [];
         foreach ($readers as $id => $name) {
             $names[] = userTag((int) $id, (string) $name);
         }
-        return '🟢 نجوای ' . implode('، ', $names) . ' مشاهده شد (' . fa(count($readers)) . ' از ' . fa(count($rs)) . ')';
+        return '📭 نجوای ' . implode('، ', $names) . ' مشاهده شد (' . fa(count($readers)) . ' از ' . fa(count($rs)) . ') 🔹';
     }
 
     public static function draft(array $from, string $text, array $recipients): string

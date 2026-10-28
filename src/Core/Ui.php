@@ -18,6 +18,7 @@ final class Ui
         'math'     => ['Input numbers', 'input_numbers'],
         'chess'    => ['Chess pawn', 'chess_pawn'],
         'whisper'  => ['Shushing face', 'shushing_face'],
+        'chat'     => ['Speech balloon', 'speech_balloon'],
         'weather'  => ['Sun behind rain cloud', 'sun_behind_rain_cloud'],
         'nid'      => ['Identification card', 'identification_card'],
         'funstat'  => ['Magnifying glass tilted left', 'magnifying_glass_tilted_left'],
@@ -56,7 +57,7 @@ final class Ui
             'id'                    => mb_substr($id, 0, 64),
             'title'                 => ($clean !== null && $clean !== '') ? $clean : $title,
             'description'           => $desc,
-            'thumbnail_url'         => self::icon($icon),
+            'thumbnail_url'         => str_starts_with($icon, 'http') ? $icon : self::icon($icon),
             'thumbnail_width'       => 256,
             'thumbnail_height'      => 256,
             'input_message_content' => [
@@ -516,9 +517,7 @@ final class Ui
                 . "پیام مخفی وسط هر چتی\n"
                 . "که فقط گیرنده می‌تونه بخونه.\n\n"
                 . "• " . $c('nj متن پیام @username') . "\n"
-                . "• " . $c('nj متن پیام 12345678') . "\n"
-                . "• " . $c('nj متن پیام @user1 @user2') . "\n\n"
-                . "💡 آخرین گیرنده‌هات تو لیست میان؛ فقط انتخابشون کن.\n"
+                . "• " . $c('nj متن پیام 12345678') . "\n\n"
                 . "💡 گیرنده تگ می‌شه تا بفهمه نجوا براش اومده.\n"
                 . "حداکثر " . fa(Whisper::MAX_LEN) . " کاراکتر؛\n"
                 . "فرستنده می‌تونه پاکش کنه و ببینه کیا فضولی کردن 🕵️",
