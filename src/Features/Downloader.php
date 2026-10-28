@@ -271,7 +271,19 @@ final class Downloader
             && ($msg !== null ? Photos::deliver($msg, $link, (int) $t['card'], $expect) : Photos::inline($link, (string) $t['imid'], $t['chat'], $uid));
 
         $multi = $sp === null && empty($t['imid']) && in_array($link['site'], self::MULTI, true);
-        $ks    = $multi && GalleryDl::supports($link['site']) ? GalleryDl::kinds($link['url']) : [];
+        $ks    = $sp === null && GalleryDl::supports($link['site']) ? GalleryDl::kinds($link['url']) : [];
+        $vurls = [];
+        $pin   = $link['url'];
+        if ($link['site'] === 'pinterest' && in_array('v', $ks, true)) {
+            $u = GalleryDl::videoUrls($link['url']);
+            if ($u !== [] && count($u) === count(array_keys($ks, 'v', true))) {
+                $vurls = $u;
+                if (count($ks) === 1) {
+                    $link['url'] = $u[0];
+                }
+            }
+            logInfo('dl', 'pinterest video: kinds=' . implode('', $ks) . ' mp4=' . count($u) . ' direct=' . ($vurls !== [] ? '1' : '0'));
+        }
         $p     = self::probe($link['url'], $multi);
         if (isset($p['error']) && count($ks) > 1 && in_array('v', $ks, true)) {
             $p = ['info' => ['count' => count($ks), 'kinds' => $ks, 'title' => '', 'webpage_url' => $link['url']]];
@@ -283,6 +295,12 @@ final class Downloader
             return;
         }
         $info = $p['info'];
+        if ($vurls !== []) {
+            $info['vurls'] = $vurls;
+            if (count($ks) === 1 && ($pt = GalleryDl::title($pin)) !== '') {
+                $info['title'] = $pt;
+            }
+        }
         if ($ks !== []) {
             $info['count'] = count($ks);
             $info['kinds'] = $ks;
@@ -319,7 +337,7 @@ final class Downloader
             return;
         }
 
-        $hasVideo = self::SITES[$link['site']][2] && self::hasVideo($info);
+        $hasVideo = self::SITES[$link['site']][2] && (self::hasVideo($info) || $vurls !== []);
         $token    = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, $t['imid']);
         $auto     = $hasVideo && $sp === null && !empty($t['group']) && empty($t['imid']) && (int) ($info['count'] ?? 1) <= 1
             ? self::armAuto($token, self::options($link['site'], $info, true, self::limit($t))[0][0] ?? 'hd')
@@ -345,6 +363,7 @@ final class Downloader
             'imid'     => $imid,
             'count'    => $count,
             'kinds'    => array_values((array) ($info['kinds'] ?? [])),
+            'vurls'    => array_values((array) ($info['vurls'] ?? [])),
         ]);
         return $token;
     }
@@ -765,7 +784,7 @@ final class Downloader
         return rtrim(preg_replace('/([?&])img_index=\d+&?/', '$1', $url) ?? $url, '?&');
     }
 
-    private static function albumYtdlp(array $job, string $url, string $outDir, int $limit, int $total): array
+    private static function albumYtdlp(array $job, string $url, string $outDir, int $limit, int $total, array $urls = []): array
     {
         $last = 0.0;
         return self::run(array_merge([self::bin()], self::commonArgs(), [
@@ -773,8 +792,8 @@ final class Downloader
             '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
             '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
             '--max-filesize', (int) ($limit / 1048576) . 'M',
-            '-o', $outDir . '/%(playlist_index)02d_%(id).30s.%(ext)s',
-            $url,
+            '-o', $outDir . ($urls !== [] ? '/%(autonumber)02d_%(id).30s.%(ext)s' : '/%(playlist_index)02d_%(id).30s.%(ext)s'),
+            ...($urls !== [] ? $urls : [$url]),
         ]), self::jobTime() - 60, static function (string $line) use ($job, $total, &$last): void {
             if (preg_match('/Downloading item (\\d+) of (\\d+)/', $line, $m) && microtime(true) - $last >= 2.5) {
                 $n = min((int) $m[2], self::ALBUM_MAX);
@@ -788,7 +807,7 @@ final class Downloader
     {
         $sub = $dir . '/v';
         @mkdir($sub, 0775, true);
-        $res    = self::albumYtdlp($job, $url, $sub, $limit, $total);
+        $res    = self::albumYtdlp($job, $url, $sub, $limit, $total, array_values((array) ($job['vurls'] ?? [])));
         $videos = [];
         foreach (self::albumFiles($sub) as [$kind, $f]) {
             if ($kind === 'video') {

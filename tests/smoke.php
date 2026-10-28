@@ -289,6 +289,11 @@ $ps = [[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg
 check('pin carousel kinds', GalleryDl::pinKinds((string) json_encode($ps)), ['v', 'p']);
 check('pin plain image', GalleryDl::pinKinds((string) json_encode([[2, ['videos' => null]]])), []);
 check('pin images only carousel', GalleryDl::pinKinds((string) json_encode([[2, ['carousel_data' => ['carousel_slots' => [['url' => 'https://i.pinimg.com/originals/a/1.jpg']]]]]])), []);
+$pu = [[2, ['videos' => ['video_list' => ['V_HLSV4' => ['url' => 'https://v1.pinimg.com/a.m3u8'], 'V_480P' => ['url' => 'https://v1.pinimg.com/a_480w.mp4', 'width' => 640, 'height' => 480], 'V_720P' => ['url' => 'https://v1.pinimg.com/a_720w.mp4', 'width' => 1080, 'height' => 720]]]]]];
+check('pin urls largest mp4', GalleryDl::pinUrls((string) json_encode($pu)), ['https://v1.pinimg.com/a_720w.mp4']);
+check('pin urls hls fallback', GalleryDl::pinUrls((string) json_encode([[2, ['videos' => ['video_list' => ['V_HLSV4' => ['url' => 'https://v1.pinimg.com/a.m3u8']]]]]])), ['https://v1.pinimg.com/a.m3u8']);
+check('pin urls carousel', GalleryDl::pinUrls((string) json_encode($ps)), ['https://v1.pinimg.com/1.mp4']);
+check('pin title', GalleryDl::pinTitle((string) json_encode([[2, ['title' => ' Last light ']]])), 'Last light');
 check('gdl garbage', GalleryDl::parse('not json'), []);
 check('gdl queued', GalleryDl::queued((string) json_encode([[6, 'https://www.pinterest.com/pin/123/', []]])), 'https://www.pinterest.com/pin/123/');
 check('gdl no queue', GalleryDl::queued('[]'), null);

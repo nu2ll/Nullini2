@@ -121,22 +121,37 @@ final class GalleryDl
         return Downloader::exec($args, 45);
     }
 
-    public static function kinds(string $url): array
+    private static function meta(string $url): array
     {
-        $key = 'gdl_kinds:' . md5($url);
+        $key = 'gdl_meta:' . md5($url);
         $hit = Store::get('cache', $key);
         if (is_array($hit) && time() - (int) ($hit['at'] ?? 0) < 1800) {
             return (array) $hit['v'];
         }
         $bin = self::bin();
         if ($bin === null) {
-            return [];
+            return ['kinds' => [], 'urls' => [], 'title' => ''];
         }
         $res  = self::list($bin, self::resolve($url));
-        $kind = self::kindsOf($res['out']);
-        logInfo('dl', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ' kinds=' . implode('', $kind));
-        Store::set('cache', $key, ['at' => time(), 'v' => $kind]);
-        return $kind;
+        $meta = ['kinds' => self::kindsOf($res['out']), 'urls' => self::pinUrls($res['out']), 'title' => self::pinTitle($res['out'])];
+        logInfo('dl', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ' kinds=' . implode('', $meta['kinds']) . ' mp4=' . count($meta['urls']));
+        Store::set('cache', $key, ['at' => time(), 'v' => $meta]);
+        return $meta;
+    }
+
+    public static function kinds(string $url): array
+    {
+        return (array) self::meta($url)['kinds'];
+    }
+
+    public static function videoUrls(string $url): array
+    {
+        return (array) self::meta($url)['urls'];
+    }
+
+    public static function title(string $url): string
+    {
+        return (string) self::meta($url)['title'];
     }
 
     private static function pinMeta(array $row): ?array
@@ -173,6 +188,73 @@ final class GalleryDl
             }
         }
         return [];
+    }
+
+    private static function bestMp4(mixed $list): ?string
+    {
+        if (!is_array($list)) {
+            return null;
+        }
+        $best = null;
+        $area = -1;
+        foreach ($list as $v) {
+            $u = is_array($v) ? (string) ($v['url'] ?? '') : '';
+            if (!preg_match('#^https?://\S+\.mp4(\?\S*)?$#i', $u)) {
+                continue;
+            }
+            $a = (int) ($v['width'] ?? 0) * (int) ($v['height'] ?? 0);
+            if ($a > $area) {
+                $area = $a;
+                $best = $u;
+            }
+        }
+        if ($best === null) {
+            foreach ($list as $v) {
+                $u = is_array($v) ? (string) ($v['url'] ?? '') : '';
+                if (preg_match('#^https?://\S+\.m3u8(\?\S*)?$#i', $u)) {
+                    return $u;
+                }
+            }
+        }
+        return $best;
+    }
+
+    public static function pinUrls(string $json): array
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            $meta = is_array($row) ? self::pinMeta($row) : null;
+            if ($meta === null) {
+                continue;
+            }
+            $slots = $meta['carousel_data']['carousel_slots'] ?? null;
+            if (is_array($slots) && $slots !== []) {
+                $out = [];
+                foreach ($slots as $slot) {
+                    if (is_array($slot) && self::hasVideoList($slot) && ($u = self::bestMp4($slot['videos']['video_list'])) !== null) {
+                        $out[] = $u;
+                    }
+                }
+                return array_slice($out, 0, self::MAX);
+            }
+            if (self::hasVideoList($meta)) {
+                $u = self::bestMp4($meta['videos']['video_list']);
+                return $u !== null ? [$u] : [];
+            }
+        }
+        return [];
+    }
+
+    public static function pinTitle(string $json): string
+    {
+        $data = json_decode(trim($json), true);
+        foreach (is_array($data) ? $data : [] as $row) {
+            $meta = is_array($row) ? self::pinMeta($row) : null;
+            if ($meta !== null && ($t = trim((string) ($meta['title'] ?? $meta['grid_title'] ?? ''))) !== '') {
+                return mb_substr($t, 0, 200);
+            }
+        }
+        return '';
     }
 
     public static function kindsOf(string $json): array
