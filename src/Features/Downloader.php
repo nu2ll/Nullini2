@@ -297,12 +297,8 @@ final class Downloader
         $info = $p['info'];
         if ($vurls !== []) {
             $info['vurls'] = $vurls;
-        }
-        if ($link['site'] === 'pinterest') {
-            foreach (GalleryDl::info($pin) as $k => $v) {
-                if ($v !== '' && $v !== 0 && ($k === 'duration' ? empty($info[$k]) : true)) {
-                    $info[$k] = $v;
-                }
+            if (count($ks) === 1 && ($pt = GalleryDl::title($pin)) !== '') {
+                $info['title'] = $pt;
             }
         }
         if ($ks !== []) {
