@@ -243,7 +243,7 @@ final class Whisper
     public static function mention(array $w): string
     {
         return implode('، ', array_map(
-            static fn($r) => userTag(!empty($r['id']) ? (int) $r['id'] : null, (string) ($r['name'] ?? ''), $r['username'] ?? null),
+            static fn($r) => '<u>' . userTag(!empty($r['id']) ? (int) $r['id'] : null, (string) ($r['name'] ?? ''), $r['username'] ?? null) . '</u>',
             self::recipients($w)
         ));
     }
@@ -266,7 +266,7 @@ final class Whisper
         $readers = (array) ($w['readers'] ?? []);
         $names   = [];
         foreach ($readers as $id => $name) {
-            $names[] = userTag((int) $id, (string) $name);
+            $names[] = '<u>' . userTag((int) $id, (string) $name) . '</u>';
         }
         return '📭 نجوای ' . implode('، ', $names) . ' مشاهده شد (' . fa(count($readers)) . ' از ' . fa(count($rs)) . ') 🔹';
     }
@@ -373,27 +373,15 @@ final class Whisper
                     return;
                 }
                 if (!$isSender && !$isRecipient) {
-                    $upd = Store::update('whisper', $imid, static function ($s) use ($from) {
+                    Store::update('whisper', $imid, static function ($s) use ($from) {
                         if (!is_array($s)) {
                             return null;
                         }
                         $k                   = (string) $from['id'];
-                        $first               = !isset($s['snoopers'][$k]);
                         $s['snoopers'][$k] = ['name' => userName($from), 'count' => (int) ($s['snoopers'][$k]['count'] ?? 0) + 1];
-                        $s['snoop_new']      = $first;
                         return $s;
                     });
-                    $tg->answer($cq);
-                    if (is_array($upd) && !empty($upd['snoop_new'])) {
-                        $multi = count(self::recipients($upd)) > 1;
-                        $seen  = !empty($upd['revealed']) || $multi;
-                        $base  = $seen ? self::seenText($upd) : self::pendingText($upd);
-                        $tg->editInline(
-                            $imid,
-                            $base . "\n🙅 " . userTag((int) $from['id'], userName($from), $from['username'] ?? null) . ' این نجوا مال تو نیست؛ فضولیت ثبت شد 😏',
-                            $seen ? self::seenKeyboard() : self::pendingKeyboard()
-                        );
-                    }
+                    $tg->alert($cq, '⚠️ برای نمایش باید فرستنده یا گیرنده‌ی نجوا باشی');
                     return;
                 }
 
@@ -428,7 +416,7 @@ final class Whisper
 
             case 'wh:del':
                 if (!$isSender) {
-                    $tg->alert($cq, '🙅 این دکمه مال فرستنده‌ست، نه تو.');
+                    $tg->alert($cq, '⚠️ برای حذف باید فرستنده‌ی نجوا باشی');
                     return;
                 }
                 if (!empty($w['deleted'])) {
@@ -445,13 +433,11 @@ final class Whisper
                     $tg->alert($cq, '🙈 آمار رو فقط فرستنده و گیرنده می‌بینن.');
                     return;
                 }
-                $snoop = empty($w['snoopers']) ? 'هیچ‌کس 😇' : implode('، ', array_map(
-                    static fn($s) => $s['name'] . ' (' . fa($s['count']) . ')',
-                    array_slice(array_values($w['snoopers']), 0, 8)
-                ));
-                $msg = $isSender
-                    ? '👁 ' . fa((int) ($w['seen'] ?? 0)) . " بار خونده شده\n\n🕵️ فضول‌ها: {$snoop}"
-                    : "🕵️ فضول‌ها: {$snoop}";
+                $sn  = array_values((array) ($w['snoopers'] ?? []));
+                $msg = ((int) ($w['seen'] ?? 0) > 0 ? '👁 ' . fa((int) $w['seen']) . ' بار خونده شده' : '⚠️ هنوز کسی ندیده') . "\n\n";
+                $msg .= $sn === []
+                    ? '😇 فضول‌ها: هیچ‌کس'
+                    : '😁 فضول‌ها: ' . fa(count($sn)) . " نفر\n" . implode(' ', array_map(static fn($x) => '[' . $x['name'] . ']', array_slice($sn, 0, 8)));
                 $tg->alert($cq, $msg);
                 return;
         }
