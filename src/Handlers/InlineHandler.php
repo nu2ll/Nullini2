@@ -246,28 +246,58 @@ final class InlineHandler
 
     private static function whisper(string $rest): void
     {
-        if (!preg_match('/^(.+?)\s+(@[A-Za-z0-9_]{3,32}|\d{5,15})$/su', $rest, $m)) {
-            self::guide('whisper', 'whisper', '🤫 نجوا', 'nj [متن] [@یوزرنیم] [آیدی]');
-            return;
-        }
-        $text = trim($m[1]);
+        $p    = Whisper::parse($rest);
+        $text = $p['text'];
         $len  = mb_strlen($text);
         if ($len > Whisper::MAX_LEN) {
             self::fail('wh_long', '✋ متن نجوا طولانیه', 'حداکثر ' . fa(Whisper::MAX_LEN) . ' کاراکتر (الان ' . fa($len) . ')',
                 '✋ متن نجوا حداکثر <b>' . fa(Whisper::MAX_LEN) . '</b> کاراکتر می‌تونه باشه؛' . "\n" . 'یه‌کم کوتاهش کن.');
             return;
         }
-        $to    = UserInfo::resolve($m[2]);
-        $token = Whisper::draft(self::$iq['from'], $text, $to);
+        $from = self::$iq['from'];
+        if ($p['to'] !== []) {
+            $to = [];
+            foreach (array_slice(array_values(array_unique($p['to'])), 0, 10) as $t) {
+                $r = UserInfo::resolve($t);
+                if (empty($r['id']) || !in_array((int) $r['id'], array_map(static fn($x) => (int) ($x['id'] ?? 0), $to), true)) {
+                    $to[] = $r;
+                }
+            }
+            self::answer([self::whisperItem($text, $to)]);
+            return;
+        }
+        $uid     = (int) $from['id'];
+        $results = [Ui::article('help_whisper', 'whisper', '🤫 نجوا', '⚠️ آیدی کاربر گیرنده رو وارد کن', Ui::guide('whisper'), Ui::tryKeyboard('whisper'))];
+        foreach (array_slice(Whisper::recent($uid), 0, 5) as $r) {
+            $results[] = self::whisperItem($text, [$r]);
+        }
+        $g = Whisper::group($uid);
+        if ($g !== []) {
+            $results[] = self::whisperItem($text, $g);
+        }
+        if ($text === '') {
+            $results[] = Whisper::requestArticle($from);
+        }
+        self::answer($results);
+    }
 
-        self::answer([Ui::article(
+    private static function whisperItem(string $text, array $to): array
+    {
+        $names = array_map(static fn($r) => ($r['name'] ?? '') !== '' ? $r['name'] : '@' . ($r['username'] ?? ''), $to);
+        $multi = count($to) > 1;
+        $title = $multi ? 'نجوای چندنفره (' . fa(count($to)) . ' نفر)' : $names[0];
+        if ($text === '') {
+            return Ui::article('whe_' . substr(md5(json_encode($to)), 0, 16), 'whisper', $title, $multi ? implode(' & ', $names) : '💬 نجوا', Whisper::emptyText(), Whisper::emptyKeyboard());
+        }
+        $token = Whisper::draft(self::$iq['from'], $text, $to);
+        return Ui::article(
             "wh_{$token}",
             'whisper',
-            '🤫 نجوا برای ' . (!$to['id'] && $to['username'] ? '@' . $to['username'] : $to['name']),
-            '🔒 ' . mb_substr($text, 0, 50),
-            Whisper::pendingText(['recipient_username' => $to['username'], 'recipient_name' => $to['name'], 'recipient_id' => $to['id']]),
-            Whisper::pendingKeyboard($token)
-        )]);
+            $title,
+            ($multi ? implode(' & ', $names) . ' · ' : '') . '🔒 ' . mb_substr($text, 0, 50),
+            Whisper::pendingText(['recipients' => $to]),
+            Whisper::pendingKeyboard($token, $multi)
+        );
     }
 
     private static function weather(string $city): void

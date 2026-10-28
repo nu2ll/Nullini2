@@ -8,6 +8,8 @@ final class Kernel
         'owner'           => 14 * 86400,
         'whisper'         => 30 * 86400,
         'whisper_pending' => 86400,
+        'whisper_recent'  => 120 * 86400,
+        'whisper_group'   => 120 * 86400,
         'weather'         => 14 * 86400,
         'weather_pending' => 2 * 86400,
         'ai_memory'       => 2 * 86400,

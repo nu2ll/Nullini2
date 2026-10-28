@@ -4,14 +4,113 @@ final class Whisper
 {
     public const MAX_LEN = 200;
 
-    public static function pendingKeyboard(string $token = ''): array
+    public static function pendingKeyboard(string $token = '', bool $multi = false): array
     {
-        return ikb([[btn('👁 نمایش نجوا', $token === '' ? 'wh:show' : 'wh:show:' . $token)]]);
+        $show = $token === '' ? 'wh:show' : 'wh:show:' . $token;
+        if ($multi) {
+            return ikb([
+                [btn('👁 نمایش', $show), btn('📊 آمار', 'wh:stats', 'success'), btn('🗑 حذف', 'wh:del', 'danger')],
+                [self::switchBtn('↪️ پاسخ', 'nj ')],
+            ]);
+        }
+        return ikb([[btn('👁 نمایش نجوا', $show)]]);
     }
 
     public static function seenKeyboard(): array
     {
-        return ikb([[btn('👁 نمایش', 'wh:show'), btn('📊 آمار', 'wh:stats', 'success'), btn('🗑 حذف', 'wh:del', 'danger')]]);
+        return ikb([
+            [btn('👁 نمایش', 'wh:show'), btn('📊 آمار', 'wh:stats', 'success'), btn('🗑 حذف', 'wh:del', 'danger')],
+            [self::switchBtn('↪️ پاسخ', 'nj ')],
+        ]);
+    }
+
+    public static function switchBtn(string $text, string $query, ?string $style = 'primary'): array
+    {
+        $b = ['text' => $text, 'switch_inline_query_current_chat' => $query];
+        if ($style !== null) {
+            $b['style'] = $style;
+        }
+        return $b;
+    }
+
+    public static function emptyText(): string
+    {
+        return '⚠️ به نظر میرسه متنی برای نجوا وارد نکردی';
+    }
+
+    public static function emptyKeyboard(): array
+    {
+        return ikb([[self::switchBtn('⬇️ ارسال دوباره', 'nj ', 'danger')]]);
+    }
+
+    public static function requestArticle(array $from): array
+    {
+        $id = (int) $from['id'];
+        return Ui::article(
+            'whr_' . $id,
+            'whisper',
+            '📨 درخواست نجوا',
+            '🆔 آیدی عددی من: ' . $id,
+            '🆔 آیدی عددی من: <code>' . $id . "</code>\n\n👇 برای نجوا به من دکمه زیر رو بزن",
+            ikb([[self::switchBtn('ارسال به ' . mb_substr(userName($from), 0, 24), 'nj ' . $id . ' ')]])
+        );
+    }
+
+    public static function parse(string $rest): array
+    {
+        $t = '(?:@[A-Za-z0-9_]{3,32}|\d{5,15})';
+        if (preg_match('/^(?:(.*?)\s+)?(' . $t . '(?:\s+' . $t . ')*)$/su', $rest, $m)) {
+            return ['text' => trim((string) ($m[1] ?? '')), 'to' => preg_split('/\s+/', $m[2])];
+        }
+        if (preg_match('/^(' . $t . '(?:\s+' . $t . ')*)(?:\s+(.*))?$/su', $rest, $m)) {
+            return ['text' => trim((string) ($m[2] ?? '')), 'to' => preg_split('/\s+/', $m[1])];
+        }
+        return ['text' => trim($rest), 'to' => []];
+    }
+
+    public static function recipients(array $w): array
+    {
+        if (!empty($w['recipients']) && is_array($w['recipients'])) {
+            return array_values($w['recipients']);
+        }
+        if (empty($w['recipient_id']) && empty($w['recipient_username']) && empty($w['recipient_name'])) {
+            return [];
+        }
+        return [['id' => $w['recipient_id'] ?? null, 'username' => $w['recipient_username'] ?? null, 'name' => (string) ($w['recipient_name'] ?? '')]];
+    }
+
+    public static function recent(int $uid): array
+    {
+        $l = Store::get('whisper_recent', (string) $uid);
+        return is_array($l) ? array_values($l) : [];
+    }
+
+    public static function group(int $uid): array
+    {
+        $g = Store::get('whisper_group', (string) $uid);
+        return is_array($g) && count($g) > 1 ? array_values($g) : [];
+    }
+
+    private static function same(array $a, array $b): bool
+    {
+        if (!empty($a['id']) && !empty($b['id'])) {
+            return (int) $a['id'] === (int) $b['id'];
+        }
+        return !empty($a['username']) && !empty($b['username']) && strcasecmp($a['username'], $b['username']) === 0;
+    }
+
+    public static function addRecent(int $uid, array $r): void
+    {
+        if ((int) ($r['id'] ?? 0) === $uid || (empty($r['id']) && empty($r['username']))) {
+            return;
+        }
+        $r = ['id' => $r['id'] ?? null, 'username' => $r['username'] ?? null, 'name' => (string) ($r['name'] ?? '')];
+        Store::update('whisper_recent', (string) $uid, static function ($l) use ($r) {
+            $l = is_array($l) ? $l : [];
+            $l = array_values(array_filter($l, static fn($x) => !self::same($x, $r)));
+            array_unshift($l, $r);
+            return array_slice($l, 0, 8);
+        });
     }
 
     public static function deletedKeyboard(): array
@@ -26,23 +125,46 @@ final class Whisper
 
     public static function mention(array $w): string
     {
-        return userTag(!empty($w['recipient_id']) ? (int) $w['recipient_id'] : null, (string) ($w['recipient_name'] ?? ''), $w['recipient_username'] ?? null);
+        return implode('، ', array_map(
+            static fn($r) => userTag(!empty($r['id']) ? (int) $r['id'] : null, (string) ($r['name'] ?? ''), $r['username'] ?? null),
+            self::recipients($w)
+        ));
     }
 
     public static function pendingText(array $w): string
     {
-        return '🤫 یه نجوا برات اومده، ' . self::mention($w) . "!\n<i>فقط خودت می‌تونی بخونیش 👇</i>";
+        $n = count(self::recipients($w));
+        if ($n > 1) {
+            return '📫 یک نجوای چندنفره برای ' . fa($n) . " نفر ارسال شد\n" . self::mention($w);
+        }
+        return '📫 یک نجوا برای ' . self::mention($w) . ' ارسال شد';
     }
 
-    public static function draft(array $from, string $text, array $recipient): string
+    public static function seenText(array $w): string
+    {
+        $rs = self::recipients($w);
+        if (count($rs) <= 1) {
+            return '🟢 نجوای ' . self::mention($w) . ' مشاهده شد';
+        }
+        $readers = (array) ($w['readers'] ?? []);
+        $names   = [];
+        foreach ($readers as $id => $name) {
+            $names[] = userTag((int) $id, (string) $name);
+        }
+        return '🟢 نجوای ' . implode('، ', $names) . ' مشاهده شد (' . fa(count($readers)) . ' از ' . fa(count($rs)) . ')';
+    }
+
+    public static function draft(array $from, string $text, array $recipients): string
     {
         $token = bin2hex(random_bytes(8));
+        $first = $recipients[0] ?? ['id' => null, 'username' => null, 'name' => ''];
         Store::set('whisper_pending', $token, [
             'sender_id'          => (int) $from['id'],
             'sender_name'        => userName($from),
-            'recipient_id'       => $recipient['id'],
-            'recipient_username' => $recipient['username'],
-            'recipient_name'     => $recipient['name'],
+            'recipient_id'       => $first['id'],
+            'recipient_username' => $first['username'],
+            'recipient_name'     => $first['name'],
+            'recipients'         => array_values($recipients),
             'text'               => $text,
         ]);
         return $token;
@@ -56,15 +178,26 @@ final class Whisper
         }
         Store::set('whisper', $imid, $p + ['seen' => 0, 'revealed' => false, 'snoopers' => [], 'deleted' => false]);
         Store::delete('whisper_pending', $token);
+        $rs = self::recipients($p);
+        foreach ($rs as $r) {
+            self::addRecent((int) $p['sender_id'], $r);
+        }
+        if (count($rs) > 1) {
+            Store::set('whisper_group', (string) $p['sender_id'], $rs);
+        }
     }
 
     private static function isRecipient(array $w, array $from): bool
     {
-        if (!empty($w['recipient_id']) && (int) $from['id'] === (int) $w['recipient_id']) {
-            return true;
+        foreach (self::recipients($w) as $r) {
+            if (!empty($r['id']) && (int) $from['id'] === (int) $r['id']) {
+                return true;
+            }
+            if (!empty($r['username']) && !empty($from['username']) && strcasecmp($from['username'], $r['username']) === 0) {
+                return true;
+            }
         }
-        return !empty($w['recipient_username']) && !empty($from['username'])
-            && strcasecmp($from['username'], $w['recipient_username']) === 0;
+        return false;
     }
 
     public static function onCallback(array $cq, string $data, string $imid): void
@@ -110,17 +243,20 @@ final class Whisper
                 $tg->alert($cq, mb_strlen($wt) <= self::MAX_LEN - 3 ? '🤫 ' . $wt : $wt);
 
                 if ($isRecipient) {
-                    $wasRevealed = !empty($w['revealed']);
-                    Store::update('whisper', $imid, static function ($s) {
+                    $k   = (string) $from['id'];
+                    $new = !isset(((array) ($w['readers'] ?? []))[$k]);
+                    $upd = Store::update('whisper', $imid, static function ($s) use ($from, $k) {
                         if (!is_array($s)) {
                             return null;
                         }
-                        $s['seen']     = (int) ($s['seen'] ?? 0) + 1;
-                        $s['revealed'] = true;
+                        $s['seen']        = (int) ($s['seen'] ?? 0) + 1;
+                        $s['revealed']    = true;
+                        $s['readers'][$k] = userName($from);
                         return $s;
                     });
-                    if (!$wasRevealed) {
-                        $tg->editInline($imid, '✅ نجوا رو ' . self::label($w) . ' خوند.', self::seenKeyboard());
+                    if ($new && is_array($upd)) {
+                        $tg->editInline($imid, self::seenText($upd), self::seenKeyboard());
+                        self::addRecent((int) $from['id'], ['id' => $w['sender_id'], 'username' => null, 'name' => (string) ($w['sender_name'] ?? '')]);
                     }
                 }
                 return;
