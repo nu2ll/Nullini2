@@ -254,7 +254,7 @@ final class GalleryDl
             }
             foreach (['title', 'grid_title', 'seo_title', 'description', 'closeup_description'] as $k) {
                 if (($t = trim((string) ($meta[$k] ?? ''))) !== '') {
-                    return mb_substr($t, 0, 200);
+                    return mb_substr($t, 0, 800);
                 }
             }
         }
@@ -274,7 +274,7 @@ final class GalleryDl
             $first = is_array($slots[0] ?? null) ? $slots[0] : [];
             $thumb = (string) ($meta['images']['orig']['url'] ?? $first['images']['orig']['url'] ?? '');
             $pin   = is_array($meta['pinner'] ?? null) ? $meta['pinner'] : [];
-            $who   = trim((string) ($pin['full_name'] ?? '')) ?: trim((string) ($pin['username'] ?? ''));
+            $who   = trim((string) ($pin['full_name'] ?? '')) ?: trim((string) ($pin['username'] ?? '')) ?: trim((string) ($meta['fullname'] ?? '')) ?: trim((string) ($meta['username'] ?? ''));
             $dur   = 0;
             if ($slots === []) {
                 foreach ((array) ($meta['videos']['video_list'] ?? []) as $v) {
@@ -285,7 +285,7 @@ final class GalleryDl
             foreach ($slots as $slot) {
                 foreach (is_array($slot) && $title === '' ? ['title', 'grid_title', 'description'] : [] as $k) {
                     if (($t = trim((string) ($slot[$k] ?? ''))) !== '') {
-                        $title = mb_substr($t, 0, 200);
+                        $title = mb_substr($t, 0, 800);
                         break 2;
                     }
                 }

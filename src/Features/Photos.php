@@ -8,6 +8,8 @@ final class Photos
     private const GROUP = 10;
     private const PHOTO_BYTES = 10 * 1048576;
 
+    private static array $info = [];
+
     public static function supports(string $site): bool
     {
         return in_array($site, self::SITES, true);
@@ -30,7 +32,7 @@ final class Photos
                 return false;
             }
             $tg->action($chat, 'upload_photo');
-            $cap  = '🖼 از ' . $link['name'];
+            $cap  = self::caption($link);
             $sent = count($files) === 1 ? self::single($chat, $files[0], $cap, (int) $msg['message_id']) : self::album($chat, $files, $cap, (int) $msg['message_id']);
             if (!$sent) {
                 return false;
@@ -65,7 +67,7 @@ final class Photos
                 $more = $got['total'] > 1 ? "\n📚 " . fa((string) $got['total']) . ' تا عکس داره؛ بقیه رو تو پیوی بگیر.' : '';
                 $e    = $tg->call('editMessageMedia', [
                     'inline_message_id' => $imid,
-                    'media'             => ['type' => 'photo', 'media' => $fid, 'caption' => '🖼 از ' . $link['name'] . $more, 'parse_mode' => 'HTML'],
+                    'media'             => ['type' => 'photo', 'media' => $fid, 'caption' => self::caption($link) . $more, 'parse_mode' => 'HTML'],
                 ], 30);
                 if (env('DL_STORE_CHAT', '') === '' && !empty($r['result']['message_id'])) {
                     $tg->call('deleteMessage', ['chat_id' => $store, 'message_id' => (int) $r['result']['message_id']], 8);
@@ -86,6 +88,15 @@ final class Photos
         }
     }
 
+    private static function caption(array $link): string
+    {
+        $info = GalleryDl::supports($link['site']) ? GalleryDl::info($link['url']) : self::$info;
+        $bot  = App::botUsername();
+        $head = (($info['title'] ?? '') !== '' ? '🖼 <b>' . h((string) $info['title']) . "</b>\n" : '')
+            . (($info['uploader'] ?? '') !== '' ? '👤 ' . h((string) $info['uploader']) . "\n" : '');
+        return $head . ($head !== '' ? "\n" : '') . "📥 <a href=\"https://t.me/{$bot}\">@{$bot}</a>";
+    }
+
     private static function collect(string $site, string $url, int $max): array
     {
         if (GalleryDl::supports($site)) {
@@ -98,6 +109,7 @@ final class Photos
             }
             return ['files' => $out, 'total' => $got['total']];
         }
+        self::$info = [];
         $sets = self::find($site, $url);
         $out  = [];
         foreach (array_slice($sets, 0, $max) as $cands) {
@@ -159,6 +171,7 @@ final class Photos
         }
         $out = [];
         $j   = Http::getJson('https://api.fxtwitter.com/status/' . $m[1], ['User-Agent: NulliniBot'], 15);
+        self::$info = ['title' => mb_substr(trim((string) ($j['tweet']['text'] ?? '')), 0, 800), 'uploader' => mb_substr(trim((string) ($j['tweet']['author']['name'] ?? '')), 0, 80)];
         foreach ((array) ($j['tweet']['media']['photos'] ?? []) as $p) {
             if (!empty($p['url'])) {
                 $out[] = [$p['url'] . (str_contains($p['url'], '?') ? '' : '?name=orig'), $p['url']];
@@ -166,6 +179,7 @@ final class Photos
         }
         if (!$out) {
             $j = Http::getJson('https://api.vxtwitter.com/Twitter/status/' . $m[1], ['User-Agent: NulliniBot'], 15);
+            self::$info = ['title' => mb_substr(trim((string) ($j['text'] ?? '')), 0, 800), 'uploader' => mb_substr(trim((string) ($j['user_name'] ?? '')), 0, 80)];
             foreach ((array) ($j['media_extended'] ?? []) as $p) {
                 if (($p['type'] ?? '') === 'image' && !empty($p['url'])) {
                     $out[] = [$p['url']];
@@ -199,6 +213,7 @@ final class Photos
             return [];
         }
         $p   = $p['crosspost_parent_list'][0] ?? $p;
+        self::$info = ['title' => mb_substr(trim((string) ($p['title'] ?? '')), 0, 800), 'uploader' => mb_substr(trim((string) ($p['author'] ?? '')), 0, 80)];
         $out = [];
         if (!empty($p['gallery_data']['items']) && is_array($p['media_metadata'] ?? null)) {
             foreach ($p['gallery_data']['items'] as $it) {
