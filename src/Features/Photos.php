@@ -6,6 +6,7 @@ final class Photos
     private const UA    = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
     private const MAX   = 20;
     private const GROUP = 10;
+    private const PHOTO_BYTES = 10 * 1048576;
 
     public static function supports(string $site): bool
     {
@@ -17,70 +18,54 @@ final class Photos
         $tg   = App::tg();
         $chat = $msg['chat']['id'];
         $tg->editMessage($chat, $mid, '🖼 دارم عکس‌هاش رو می‌گیرم...');
+        $files = [];
         try {
-            $sets = array_slice(self::find($link['site'], $link['url']), 0, self::MAX);
+            $files = self::collect($link['site'], $link['url'], self::MAX)['files'];
+            logInfo('dl', "photo {$link['site']}: count=" . count($files) . " expect={$expect}");
+            if (!$files) {
+                return false;
+            }
+            if ($expect > 1 && count($files) < $expect) {
+                logInfo('dl', "photo {$link['site']}: got " . count($files) . " of {$expect}, falling back to yt-dlp");
+                return false;
+            }
+            $tg->action($chat, 'upload_photo');
+            $cap  = '🖼 از ' . $link['name'];
+            $sent = count($files) === 1 ? self::single($chat, $files[0], $cap, (int) $msg['message_id']) : self::album($chat, $files, $cap, (int) $msg['message_id']);
+            if (!$sent) {
+                return false;
+            }
+            Downloader::charge((int) $msg['from']['id']);
+            Users::hit('dl:photo');
+            $tg->call('deleteMessage', ['chat_id' => $chat, 'message_id' => $mid], 8);
+            return true;
         } catch (\Throwable $e) {
             logWarn('dl', $link['site'] . ' photo failed: ' . $e->getMessage());
             return false;
+        } finally {
+            self::cleanup($files);
         }
-        logInfo('dl', "photo {$link['site']}: count=" . count($sets) . " expect={$expect}");
-        if (!$sets) {
-            return false;
-        }
-        if ($expect > 1 && count($sets) < $expect) {
-            logInfo('dl', "photo {$link['site']}: got " . count($sets) . " of {$expect}, falling back to yt-dlp");
-            return false;
-        }
-        $tg->action($chat, 'upload_photo');
-        $cap  = '🖼 از ' . $link['name'];
-        $sent = count($sets) === 1 ? self::single($chat, $sets[0], $cap, (int) $msg['message_id']) : self::album($chat, $sets, $cap, (int) $msg['message_id']);
-        if (!$sent) {
-            return false;
-        }
-        Downloader::charge((int) $msg['from']['id']);
-        Users::hit('dl:photo');
-        $tg->call('deleteMessage', ['chat_id' => $chat, 'message_id' => $mid], 8);
-        return true;
     }
 
     public static function inline(array $link, string $imid, int|string $store, int $uid): bool
     {
         $tg = App::tg();
         $tg->editInline($imid, '🖼 دارم عکسش رو می‌گیرم...');
+        $files = [];
         try {
-            $sets = self::find($link['site'], $link['url']);
-        } catch (\Throwable $e) {
-            logWarn('dl', $link['site'] . ' photo failed: ' . $e->getMessage());
-            return false;
-        }
-        foreach (array_slice($sets, 0, 1) as $cands) {
-            foreach ($cands as $u) {
-                $b = self::fetch($u);
-                if ($b === null) {
-                    continue;
-                }
-                $tmp = tempnam(sys_get_temp_dir(), 'nl_ph_');
-                if ($tmp === false || file_put_contents($tmp, $b) === false) {
-                    return false;
-                }
-                $anim = self::isAnim($b);
-                $mp4  = self::isMp4($b);
-                try {
-                    $r = $anim
-                        ? $tg->call('sendAnimation', ['chat_id' => $store, 'animation' => $mp4 ? new CURLFile($tmp, 'video/mp4', 'nullini.mp4') : new CURLFile($tmp, 'image/gif', 'nullini.gif'), 'disable_notification' => true], 90)
-                        : $tg->call('sendPhoto', ['chat_id' => $store, 'photo' => new CURLFile($tmp, 'image/jpeg', 'photo.jpg'), 'disable_notification' => true], 90);
-                } finally {
-                    @unlink($tmp);
-                }
+            $got   = self::collect($link['site'], $link['url'], 1);
+            $files = $got['files'];
+            foreach ($files as $f) {
+                $r     = $tg->call('sendPhoto', ['chat_id' => $store, 'photo' => new CURLFile($f, 'image/jpeg', 'photo.jpg'), 'disable_notification' => true], 90);
                 $sizes = (array) ($r['result']['photo'] ?? []);
-                $fid   = $anim ? (string) ($r['result']['animation']['file_id'] ?? $r['result']['document']['file_id'] ?? '') : (string) (end($sizes)['file_id'] ?? '');
+                $fid   = (string) (end($sizes)['file_id'] ?? '');
                 if ($fid === '') {
                     continue;
                 }
-                $more = count($sets) > 1 ? "\n📚 " . fa((string) count($sets)) . ' تا عکس داره؛ بقیه رو تو پیوی بگیر.' : '';
+                $more = $got['total'] > 1 ? "\n📚 " . fa((string) $got['total']) . ' تا عکس داره؛ بقیه رو تو پیوی بگیر.' : '';
                 $e    = $tg->call('editMessageMedia', [
                     'inline_message_id' => $imid,
-                    'media'             => ['type' => $anim ? 'animation' : 'photo', 'media' => $fid, 'caption' => '🖼 از ' . $link['name'] . $more, 'parse_mode' => 'HTML'],
+                    'media'             => ['type' => 'photo', 'media' => $fid, 'caption' => '🖼 از ' . $link['name'] . $more, 'parse_mode' => 'HTML'],
                 ], 30);
                 if (env('DL_STORE_CHAT', '') === '' && !empty($r['result']['message_id'])) {
                     $tg->call('deleteMessage', ['chat_id' => $store, 'message_id' => (int) $r['result']['message_id']], 8);
@@ -92,39 +77,79 @@ final class Photos
                 }
                 return false;
             }
+            return false;
+        } catch (\Throwable $e) {
+            logWarn('dl', $link['site'] . ' photo failed: ' . $e->getMessage());
+            return false;
+        } finally {
+            self::cleanup($files);
         }
-        return false;
+    }
+
+    private static function collect(string $site, string $url, int $max): array
+    {
+        if (GalleryDl::supports($site)) {
+            $got = GalleryDl::photos($url, $max);
+            $out = [];
+            foreach ($got['files'] as $f) {
+                if (($ok = self::prepared((string) $f)) !== null) {
+                    $out[] = $ok;
+                }
+            }
+            return ['files' => $out, 'total' => $got['total']];
+        }
+        $sets = self::find($site, $url);
+        $out  = [];
+        foreach (array_slice($sets, 0, $max) as $cands) {
+            foreach ($cands as $u) {
+                if (($b = self::fetch($u)) === null) {
+                    continue;
+                }
+                $tmp = tempnam(sys_get_temp_dir(), 'nl_ph_');
+                if ($tmp !== false && file_put_contents($tmp, $b) !== false) {
+                    $out[] = $tmp;
+                }
+                break;
+            }
+        }
+        return ['files' => $out, 'total' => count($sets)];
+    }
+
+    private static function prepared(string $f): ?string
+    {
+        $b = (string) @file_get_contents($f);
+        if ($b === '' || strlen($b) < 800 || str_starts_with($b, 'GIF') || self::isMp4($b)) {
+            @unlink($f);
+            return null;
+        }
+        if (self::isHeic($b) || in_array(strtolower(pathinfo($f, PATHINFO_EXTENSION)), ['heic', 'avif'], true)) {
+            $jpg = self::heicToJpeg($b);
+            @unlink($f);
+            if ($jpg === null) {
+                return null;
+            }
+            $tmp = tempnam(sys_get_temp_dir(), 'nl_ph_');
+            return $tmp !== false && file_put_contents($tmp, $jpg) !== false ? $tmp : null;
+        }
+        if (strlen($b) > self::PHOTO_BYTES || @getimagesizefromstring($b) === false) {
+            @unlink($f);
+            return null;
+        }
+        return $f;
+    }
+
+    private static function cleanup(array $files): void
+    {
+        GalleryDl::cleanup($files);
     }
 
     private static function find(string $site, string $url): array
     {
         return match ($site) {
-            'instagram' => GalleryDl::images($url),
-            'pinterest' => self::pinterest($url),
-            'twitter'   => self::twitter($url),
-            'reddit'    => self::reddit($url),
-            default     => [],
+            'twitter' => self::twitter($url),
+            'reddit'  => self::reddit($url),
+            default   => [],
         };
-    }
-
-    private static function pinterest(string $url): array
-    {
-        $raw  = '';
-        $sets = GalleryDl::images($url, 0, $raw);
-        $slots = GalleryDl::pinSlots($raw);
-        if (count($slots) > 1) {
-            logInfo('dl', 'pinterest: carousel with video, slots=' . count($slots));
-            return $slots;
-        }
-        if (($v = GalleryDl::pinVideo($raw)) !== null) {
-            if ($v['ms'] > GalleryDl::GIF_MAX_MS) {
-                logInfo('dl', 'pinterest: real video (' . intdiv($v['ms'], 1000) . 's), left to yt-dlp');
-                return [];
-            }
-            logInfo('dl', 'pinterest: animated pin, using mp4');
-            return [[$v['url']]];
-        }
-        return $sets;
     }
 
     private static function twitter(string $url): array
@@ -200,17 +225,13 @@ final class Photos
 
     private static function fetch(string $url): ?string
     {
-        $r   = Http::request('GET', $url, ['timeout' => 40, 'headers' => ['User-Agent: ' . self::UA, 'Accept: image/avif,image/webp,image/*,*/*']]);
-        $b   = $r['body'];
-        $gif = $b !== null && (str_starts_with($b, 'GIF') || self::isMp4($b));
-        if ($b === null || $r['code'] >= 400 || strlen($b) < 800 || strlen($b) > ($gif ? 30 : 10) * 1048576) {
+        $r = Http::request('GET', $url, ['timeout' => 40, 'headers' => ['User-Agent: ' . self::UA, 'Accept: image/avif,image/webp,image/*,*/*']]);
+        $b = $r['body'];
+        if ($b === null || $r['code'] >= 400 || strlen($b) < 800 || strlen($b) > self::PHOTO_BYTES || str_starts_with($b, 'GIF') || self::isMp4($b)) {
             return null;
         }
         if (self::isHeic($b)) {
             return self::heicToJpeg($b);
-        }
-        if (self::isMp4($b)) {
-            return $b;
         }
         return @getimagesizefromstring($b) === false ? null : $b;
     }
@@ -220,14 +241,22 @@ final class Photos
         return substr($b, 4, 4) === 'ftyp' && !self::isHeic($b);
     }
 
-    private static function isAnim(string $b): bool
-    {
-        return str_starts_with($b, 'GIF') || self::isMp4($b);
-    }
-
     private static function isHeic(string $b): bool
     {
         return substr($b, 4, 4) === 'ftyp' && in_array(substr($b, 8, 4), ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'], true);
+    }
+
+    public static function convertDir(string $dir): void
+    {
+        foreach ((array) glob($dir . '/*') as $f) {
+            if (!is_file($f) || !in_array(strtolower(pathinfo((string) $f, PATHINFO_EXTENSION)), ['heic', 'heif', 'avif'], true)) {
+                continue;
+            }
+            $jpg = self::heicToJpeg((string) file_get_contents($f));
+            if ($jpg !== null && file_put_contents((string) preg_replace('/\.\w+$/', '.jpg', (string) $f), $jpg) !== false) {
+                @unlink($f);
+            }
+        }
     }
 
     private static function heicToJpeg(string $b): ?string
@@ -256,83 +285,36 @@ final class Photos
         }
     }
 
-    private static function single(int|string $chat, array $cands, string $cap, int $replyTo): bool
+    private static function single(int|string $chat, string $file, string $cap, int $replyTo): bool
     {
-        foreach ($cands as $u) {
-            $b = self::fetch($u);
-            if ($b === null) {
-                continue;
-            }
-            $sent = self::isAnim($b)
-                ? App::tg()->sendAnimationBytes($chat, $b, $cap, $replyTo)
-                : App::tg()->sendPhotoBytes($chat, $b, $cap, $replyTo);
-            if ($sent) {
-                return true;
-            }
-        }
-        return false;
+        return App::tg()->sendPhotoBytes($chat, (string) file_get_contents($file), $cap, $replyTo);
     }
 
-    private static function album(int|string $chat, array $sets, string $cap, int $replyTo): bool
+    private static function album(int|string $chat, array $files, string $cap, int $replyTo): bool
     {
-        $files = [];
-        $gifs  = [];
-        try {
-            foreach ($sets as $cands) {
-                foreach ($cands as $u) {
-                    if (($b = self::fetch($u)) !== null) {
-                        $tmp = tempnam(sys_get_temp_dir(), 'nl_ph_');
-                        if ($tmp !== false && file_put_contents($tmp, $b) !== false) {
-                            if (self::isAnim($b)) {
-                                $gifs[] = $tmp;
-                            } else {
-                                $files[] = $tmp;
-                            }
-                        }
-                        break;
-                    }
-                }
+        $ok = false;
+        foreach (array_chunk($files, self::GROUP) as $g => $chunk) {
+            $capG = $g === 0 ? $cap : '';
+            if (count($chunk) === 1) {
+                $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($chunk[0]), $capG, $replyTo) || $ok;
+                continue;
             }
-            if (!$files && !$gifs) {
-                return false;
+            $media  = [];
+            $params = ['chat_id' => $chat, 'reply_parameters' => ['message_id' => $replyTo, 'allow_sending_without_reply' => true]];
+            foreach ($chunk as $i => $f) {
+                $media[]         = ['type' => 'photo', 'media' => "attach://p{$i}"] + ($i === 0 && $capG !== '' ? ['caption' => $capG, 'parse_mode' => 'HTML'] : []);
+                $params["p{$i}"] = new CURLFile($f, 'image/jpeg', "p{$i}.jpg");
             }
-            $ok = false;
-            foreach ($gifs as $g => $f) {
-                $ok = App::tg()->sendAnimationBytes($chat, (string) file_get_contents($f), $g === 0 && !$files ? $cap : '', $replyTo) || $ok;
+            $params['media'] = $media;
+            $r = App::tg()->call('sendMediaGroup', $params, 180);
+            if (!empty($r['ok'])) {
+                $ok = true;
+                continue;
             }
-            if (!$files) {
-                return $ok;
-            }
-            if (count($files) === 1) {
-                return App::tg()->sendPhotoBytes($chat, (string) file_get_contents($files[0]), $cap, $replyTo) || $ok;
-            }
-            foreach (array_chunk($files, self::GROUP) as $g => $chunk) {
-                $capG = $g === 0 ? $cap : '';
-                if (count($chunk) === 1) {
-                    $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($chunk[0]), $capG, $replyTo) || $ok;
-                    continue;
-                }
-                $media  = [];
-                $params = ['chat_id' => $chat, 'reply_parameters' => ['message_id' => $replyTo, 'allow_sending_without_reply' => true]];
-                foreach ($chunk as $i => $f) {
-                    $media[]         = ['type' => 'photo', 'media' => "attach://p{$i}"] + ($i === 0 && $capG !== '' ? ['caption' => $capG, 'parse_mode' => 'HTML'] : []);
-                    $params["p{$i}"] = new CURLFile($f, 'image/jpeg', "p{$i}.jpg");
-                }
-                $params['media'] = $media;
-                $r = App::tg()->call('sendMediaGroup', $params, 180);
-                if (!empty($r['ok'])) {
-                    $ok = true;
-                    continue;
-                }
-                foreach ($chunk as $i => $f) {
-                    $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($f), $i === 0 ? $capG : '', $replyTo) || $ok;
-                }
-            }
-            return $ok;
-        } finally {
-            foreach (array_merge($files, $gifs) as $f) {
-                @unlink($f);
+            foreach ($chunk as $i => $f) {
+                $ok = App::tg()->sendPhotoBytes($chat, (string) file_get_contents($f), $i === 0 ? $capG : '', $replyTo) || $ok;
             }
         }
+        return $ok;
     }
 }

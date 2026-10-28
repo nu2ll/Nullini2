@@ -244,7 +244,7 @@ final class Downloader
 
     private static function limit(array $t): int
     {
-        return !empty($t['imid']) ? self::BOT_API_BYTES : self::maxBytes();
+        return self::maxBytes();
     }
 
     private static function prepare(array $t, array $link, int $uid, int $replyTo, ?array $msg): void
@@ -271,8 +271,9 @@ final class Downloader
             && ($msg !== null ? Photos::deliver($msg, $link, (int) $t['card'], $expect) : Photos::inline($link, (string) $t['imid'], $t['chat'], $uid));
 
         $multi = $sp === null && empty($t['imid']) && in_array($link['site'], self::MULTI, true);
+        $ks    = $multi && GalleryDl::supports($link['site']) ? GalleryDl::kinds($link['url']) : [];
         $p     = self::probe($link['url'], $multi);
-        if (isset($p['error']) && $multi && $link['site'] === 'instagram' && count($ks = GalleryDl::kinds($link['url'])) > 1 && in_array('v', $ks, true)) {
+        if (isset($p['error']) && count($ks) > 1 && in_array('v', $ks, true)) {
             $p = ['info' => ['count' => count($ks), 'kinds' => $ks, 'title' => '', 'webpage_url' => $link['url']]];
         }
         if (isset($p['error'])) {
@@ -281,21 +282,21 @@ final class Downloader
             }
             return;
         }
-        $info  = $p['info'];
-        $count = (int) ($info['count'] ?? 1);
-        logInfo('dl', "probe {$link['site']}: count={$count} kinds=" . implode('', (array) ($info['kinds'] ?? [])) . ' video=' . (self::hasVideo($info) ? '1' : '0') . ' multi=' . ($multi ? '1' : '0'));
-        if ($multi && $count <= 1 && $link['site'] === 'instagram' && count($ks = GalleryDl::kinds($link['url'])) > 1) {
-            $info['count'] = $count = count($ks);
+        $info = $p['info'];
+        if ($ks !== []) {
+            $info['count'] = count($ks);
             $info['kinds'] = $ks;
-            logInfo('dl', "gallery-dl overrides probe: count={$count} kinds=" . implode('', $ks));
         }
+        $count = (int) ($info['count'] ?? 1);
+        $vid   = $ks !== [] ? in_array('v', $ks, true) : self::hasVideo($info);
+        logInfo('dl', "probe {$link['site']}: count={$count} kinds=" . implode('', (array) ($info['kinds'] ?? [])) . ' video=' . ($vid ? '1' : '0') . ' multi=' . ($multi ? '1' : '0') . ' src=' . ($ks !== [] ? 'gallery-dl' : 'yt-dlp'));
         if ($multi && $count > 1 && (in_array('v', (array) ($info['kinds'] ?? []), true) || !Photos::supports($link['site']))) {
             $token = self::newJob($link, $info, $uid, $t['chat'], (int) $t['card'], $replyTo, null, $count);
             self::show($t, self::albumText($info, $link, $count), self::albumKeyboard($token, $count), self::preview($info));
             return;
         }
         $expect = $multi && $count > 1 ? min($count, self::ALBUM_MAX) : 0;
-        if (!self::hasVideo($info) && $sp === null && Photos::supports($link['site']) && $photos($expect)) {
+        if (!$vid && $sp === null && Photos::supports($link['site']) && $photos($expect)) {
             return;
         }
         if ($expect > 1) {
@@ -343,6 +344,7 @@ final class Downloader
             'reply_to' => $replyTo,
             'imid'     => $imid,
             'count'    => $count,
+            'kinds'    => array_values((array) ($info['kinds'] ?? [])),
         ]);
         return $token;
     }
@@ -657,7 +659,7 @@ final class Downloader
             $res   = self::run(array_merge([self::bin()], self::commonArgs(), self::formatArgs($fmt, $limit <= self::BOT_API_BYTES), [
                 '--no-playlist', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
                 '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
-                '--max-filesize', (int) ($limit / 1048576) - 1 . 'M',
+                '--max-filesize', (int) ($limit / 1048576) . 'M',
                 '--progress-template', 'download:NLP %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s',
                 '-o', $dir . '/%(id).40s.%(ext)s',
             ], [], [
@@ -763,6 +765,58 @@ final class Downloader
         return rtrim(preg_replace('/([?&])img_index=\d+&?/', '$1', $url) ?? $url, '?&');
     }
 
+    private static function albumYtdlp(array $job, string $url, string $outDir, int $limit, int $total): array
+    {
+        $last = 0.0;
+        return self::run(array_merge([self::bin()], self::commonArgs(), [
+            '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<45M]+ba[filesize<5M]/b[filesize<50M]/bv*+ba/b', '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
+            '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
+            '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
+            '--max-filesize', (int) ($limit / 1048576) . 'M',
+            '-o', $outDir . '/%(playlist_index)02d_%(id).30s.%(ext)s',
+            $url,
+        ]), self::jobTime() - 60, static function (string $line) use ($job, $total, &$last): void {
+            if (preg_match('/Downloading item (\\d+) of (\\d+)/', $line, $m) && microtime(true) - $last >= 2.5) {
+                $n = min((int) $m[2], self::ALBUM_MAX);
+                self::show($job, self::stageText($job, '📦 فایل ' . fa($m[1]) . ' از ' . fa((string) $n) . "\n" . self::bar((int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . ' ' . fa((string) (int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . '٪'));
+                $last = microtime(true);
+            }
+        });
+    }
+
+    private static function albumVideos(array $job, string $url, string $dir, int $limit, int $total): array
+    {
+        $sub = $dir . '/v';
+        @mkdir($sub, 0775, true);
+        $res    = self::albumYtdlp($job, $url, $sub, $limit, $total);
+        $videos = [];
+        foreach (self::albumFiles($sub) as [$kind, $f]) {
+            if ($kind === 'video') {
+                $videos[] = $f;
+            }
+        }
+        $pos = [];
+        foreach (array_values((array) ($job['kinds'] ?? [])) as $i => $k) {
+            if ($k === 'v') {
+                $pos[] = $i + 1;
+            }
+        }
+        $aligned = $videos !== [];
+        foreach ($videos as $f) {
+            if (!preg_match('/^(\d+)_/', basename($f), $m) || !in_array((int) $m[1], $pos, true)) {
+                $aligned = false;
+                break;
+            }
+        }
+        foreach ($videos as $i => $f) {
+            $n = $aligned ? (int) substr(basename($f), 0, (int) strpos(basename($f), '_')) : ($pos[$i] ?? 99);
+            @rename($f, $dir . '/' . sprintf('%02d_v_', $n) . (string) preg_replace('/^\d+_/', '', basename($f)));
+        }
+        self::rmrf($sub);
+        logInfo('dl', "{$job['site']} album videos via yt-dlp: files=" . count($videos) . ' aligned=' . ($aligned ? '1' : '0'));
+        return $res;
+    }
+
     private static function workAlbum(array $job, string $token, string $dir): void
     {
         $tg    = App::tg();
@@ -771,26 +825,21 @@ final class Downloader
         $limit = self::limit($job);
         $last  = 0.0;
         self::show($job, self::stageText($job, '⏳ دارم ' . fa((string) $total) . ' تا فایل رو می‌گیرم...'));
-        $url = self::cleanUrl((string) $job['url'], (string) $job['site']);
-        $res = $job['site'] === 'instagram' ? GalleryDl::download($url, $dir, self::jobTime() - 60, $limit) : ['code' => 1, 'out' => '', 'err' => ''];
-        if ($job['site'] === 'instagram') {
-            logInfo('dl', 'instagram album via gallery-dl: files=' . count(self::albumFiles($dir)));
+        $url   = self::cleanUrl((string) $job['url'], (string) $job['site']);
+        $kinds = (array) ($job['kinds'] ?? []);
+        $res   = ['code' => 1, 'out' => '', 'err' => ''];
+        if (GalleryDl::supports((string) $job['site'])) {
+            if ($kinds === [] || in_array('p', $kinds, true)) {
+                $res = GalleryDl::download($url, $dir, self::jobTime() - 60, $limit, self::ALBUM_MAX, true);
+                logInfo('dl', "{$job['site']} album photos via gallery-dl: files=" . count(self::albumFiles($dir)));
+            }
+            if ($kinds === [] || in_array('v', $kinds, true)) {
+                $res = self::albumVideos($job, $url, $dir, $limit, $total);
+            }
         }
+        Photos::convertDir($dir);
         if (self::albumFiles($dir) === []) {
-            $res = self::run(array_merge([self::bin()], self::commonArgs(), [
-                '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<44M]+ba[filesize<5M]/b[filesize<49M]/bv*+ba/b', '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
-                '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
-                '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
-                '--max-filesize', (int) ($limit / 1048576) - 1 . 'M',
-                '-o', $dir . '/%(playlist_index)02d_%(id).30s.%(ext)s',
-                $url,
-            ]), self::jobTime() - 60, static function (string $line) use ($job, $total, &$last): void {
-                if (preg_match('/Downloading item (\d+) of (\d+)/', $line, $m) && microtime(true) - $last >= 2.5) {
-                    $n = min((int) $m[2], self::ALBUM_MAX);
-                    self::show($job, self::stageText($job, '📦 فایل ' . fa($m[1]) . ' از ' . fa((string) $n) . "\n" . self::bar((int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . ' ' . fa((string) (int) floor(((int) $m[1] - 1) / max(1, $n) * 100)) . '٪'));
-                    $last = microtime(true);
-                }
-            });
+            $res = self::albumYtdlp($job, $url, $dir, $limit, $total);
         }
 
         $items   = [];
@@ -909,7 +958,7 @@ final class Downloader
         if (self::mtproto() && !$small) {
             $sel = "bv*{$v}+ba/b{$v}/bv*+ba/b";
         } else {
-            $sel = "bv*{$v}[filesize<44M]+ba[filesize<5M]/bv*{$v}[filesize_approx<44M]+ba/b{$v}[filesize<49M]/b{$v}[filesize_approx<49M]/bv*{$v}+ba/b{$v}/bv*+ba/b";
+            $sel = "bv*{$v}[filesize<45M]+ba[filesize<5M]/bv*{$v}[filesize_approx<45M]+ba/b{$v}[filesize<50M]/b{$v}[filesize_approx<50M]/bv*{$v}+ba/b{$v}/bv*+ba/b";
         }
         return ['-f', $sel, '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4', '--remux-video', 'mp4'];
     }
@@ -1111,13 +1160,32 @@ final class Downloader
 
     private static function toInline(array $job, array $c): bool
     {
+        $fwd = 0;
+        if (($c['type'] ?? '') === 'copy' && !empty($c['msg']) && isset($c['chat'])) {
+            $f   = App::tg()->call('forwardMessage', ['chat_id' => $job['chat'], 'from_chat_id' => $c['chat'], 'message_id' => (int) $c['msg'], 'disable_notification' => true], 60);
+            $m   = (array) ($f['result'] ?? []);
+            $fwd = (int) ($m['message_id'] ?? 0);
+            $c   = ['type' => '', 'file_id' => ''];
+            foreach (['video', 'animation', 'audio', 'document'] as $k) {
+                if (!empty($m[$k]['file_id'])) {
+                    $c = ['type' => $k, 'file_id' => (string) $m[$k]['file_id']];
+                    break;
+                }
+            }
+        }
         if (!in_array($c['type'] ?? '', ['video', 'audio', 'animation', 'document'], true) || empty($c['file_id'])) {
+            if ($fwd > 0) {
+                App::tg()->call('deleteMessage', ['chat_id' => $job['chat'], 'message_id' => $fwd], 8);
+            }
             return false;
         }
         $r = App::tg()->call('editMessageMedia', [
             'inline_message_id' => $job['imid'],
             'media'             => ['type' => $c['type'], 'media' => $c['file_id'], 'caption' => self::caption($job), 'parse_mode' => 'HTML'],
         ], 30);
+        if ($fwd > 0) {
+            App::tg()->call('deleteMessage', ['chat_id' => $job['chat'], 'message_id' => $fwd], 8);
+        }
         return !empty($r['ok']);
     }
 

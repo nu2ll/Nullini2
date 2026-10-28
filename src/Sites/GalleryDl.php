@@ -2,12 +2,12 @@
 
 final class GalleryDl
 {
-    public const MAX        = 20;
-    public const GIF_MAX_MS = 60000;
+    public const MAX = 20;
+    public const TMP = 'nl_gdl_';
 
     private const SITES = ['instagram', 'pinterest'];
-    private const VIDEO = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'm3u8', 'mpd'];
-    private const IMAGE = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic'];
+    private const VIDEO = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'm3u8', 'mpd', 'gif'];
+    private const IMAGE = ['jpg', 'jpeg', 'png', 'webp', 'avif', 'heic', 'heif'];
 
     public static function supports(string $site): bool
     {
@@ -33,22 +33,23 @@ final class GalleryDl
         return $bin = ($found !== '' ? $found : null);
     }
 
-    public static function images(string $url, int $depth = 0, ?string &$raw = null): array
+    public static function images(string $url, int $depth = 0, ?string &$raw = null, ?string &$final = null): array
     {
         $bin = self::bin();
         if ($bin === null) {
             logWarn('dl', 'gallery-dl not found, photo download disabled');
             return [];
         }
-        $url  = self::resolve($url);
-        $res  = self::list($bin, $url);
+        $url   = self::resolve($url);
+        $final = $url;
+        $res   = self::list($bin, $url);
         $raw  = $res['out'];
         $sets = self::parse($res['out']);
         $host = (string) parse_url($url, PHP_URL_HOST);
         logInfo('dl', "gallery-dl {$host}: count=" . count($sets));
         if ($sets === [] && $depth < 2 && ($next = self::queued($res['out'])) !== null && $next !== $url) {
             logInfo('dl', "gallery-dl {$host}: queued -> " . (string) parse_url($next, PHP_URL_HOST));
-            return self::images($next, $depth + 1, $raw);
+            return self::images($next, $depth + 1, $raw, $final);
         }
         if ($sets === []) {
             logWarn('dl', "gallery-dl {$host} failed (exit {$res['code']}): " . self::lastLine($res['err']));
@@ -56,17 +57,46 @@ final class GalleryDl
         return $sets;
     }
 
-    private static function findGif(array $meta, int $depth = 0): ?string
+    public static function photos(string $url, int $max = self::MAX): array
     {
-        foreach ($meta as $v) {
-            if (is_string($v) && preg_match('#^https?://\S+\.gif(\?\S*)?$#i', $v)) {
-                return $v;
-            }
-            if (is_array($v) && $depth < 4 && ($f = self::findGif($v, $depth + 1)) !== null) {
-                return $f;
+        $final = $url;
+        $sets  = self::images($url, 0, $raw, $final);
+        if ($sets === []) {
+            return ['files' => [], 'total' => 0];
+        }
+        $dir = sys_get_temp_dir() . '/' . self::TMP . bin2hex(random_bytes(6));
+        if (!@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return ['files' => [], 'total' => count($sets)];
+        }
+        self::download($final, $dir, 120, Downloader::BOT_API_BYTES, $max, true);
+        $files = (array) glob($dir . '/*');
+        natsort($files);
+        $out = [];
+        foreach ($files as $f) {
+            $ext = strtolower(pathinfo((string) $f, PATHINFO_EXTENSION));
+            if (is_file($f) && !str_contains((string) $f, '.part') && (int) filesize($f) > 0 && in_array($ext, self::IMAGE, true)) {
+                $out[] = $f;
             }
         }
-        return null;
+        if ($out === []) {
+            self::cleanup([$dir . '/x']);
+        }
+        return ['files' => $out, 'total' => count($sets)];
+    }
+
+    public static function cleanup(array $files): void
+    {
+        foreach ($files as $f) {
+            $d = dirname((string) $f);
+            if (str_starts_with(basename($d), self::TMP)) {
+                foreach ((array) glob($d . '/*') as $x) {
+                    @unlink((string) $x);
+                }
+                @rmdir($d);
+            } else {
+                @unlink((string) $f);
+            }
+        }
     }
 
     private static function lastLine(string $err): string
@@ -102,7 +132,7 @@ final class GalleryDl
         if ($bin === null) {
             return [];
         }
-        $res  = self::list($bin, $url);
+        $res  = self::list($bin, self::resolve($url));
         $kind = self::kindsOf($res['out']);
         logInfo('dl', 'gallery-dl ' . (string) parse_url($url, PHP_URL_HOST) . ' kinds=' . implode('', $kind));
         Store::set('cache', $key, ['at' => time(), 'v' => $kind]);
@@ -129,14 +159,17 @@ final class GalleryDl
         return array_slice($out, 0, self::MAX);
     }
 
-    public static function download(string $url, string $dir, int $timeout, int $limit): array
+    public static function download(string $url, string $dir, int $timeout, int $limit, int $max = self::MAX, bool $photosOnly = false): array
     {
         $bin = self::bin();
         if ($bin === null) {
             logWarn('dl', 'gallery-dl not found, album download disabled');
             return ['code' => -1, 'out' => '', 'err' => 'gallery-dl not found'];
         }
-        $args = [$bin, '--config-ignore', '-D', $dir, '-f', '{num:>02}_{filename}.{extension}', '--range', '1-' . self::MAX, '--filesize-max', max(1, (int) ($limit / 1048576) - 1) . 'M', '-o', 'timeout=20'];
+        $args = [$bin, '--config-ignore', '-D', $dir, '-f', '{num:>02}_{filename}.{extension}', '--range', '1-' . $max, '--filesize-max', max(1, (int) ($limit / 1048576)) . 'M', '-o', 'timeout=20'];
+        if ($photosOnly) {
+            array_push($args, '--filter', "extension in ('jpg', 'jpeg', 'png', 'webp', 'avif', 'heic', 'heif')");
+        }
         if (($jar = Downloader::cookiesFile()) !== null) {
             $args[] = '--cookies';
             $args[] = $jar;
@@ -152,79 +185,6 @@ final class GalleryDl
             logWarn('dl', 'gallery-dl album ' . (string) parse_url($url, PHP_URL_HOST) . " exit {$res['code']}: " . self::lastLine($res['err']));
         }
         return $res;
-    }
-
-    private static function pinMeta(array $row): ?array
-    {
-        $meta = ($row[0] ?? null) === 2 ? ($row[1] ?? null) : (($row[0] ?? null) === 3 ? ($row[2] ?? null) : null);
-        return is_array($meta) ? $meta : null;
-    }
-
-    private static function mp4(mixed $list): ?array
-    {
-        if (!is_array($list)) {
-            return null;
-        }
-        $best = null;
-        $area = -1;
-        foreach ($list as $v) {
-            $u = is_array($v) ? (string) ($v['url'] ?? '') : '';
-            if (!preg_match('#^https?://\S+\.mp4(\?\S*)?$#i', $u)) {
-                continue;
-            }
-            $a = (int) ($v['width'] ?? 0) * (int) ($v['height'] ?? 0);
-            if ($a > $area) {
-                $area = $a;
-                $best = ['url' => $u, 'ms' => (int) ($v['duration'] ?? 0)];
-            }
-        }
-        return $best;
-    }
-
-    public static function pinVideo(string $json): ?array
-    {
-        $data = json_decode(trim($json), true);
-        foreach (is_array($data) ? $data : [] as $row) {
-            if (is_array($row) && ($meta = self::pinMeta($row)) !== null && ($v = self::mp4($meta['videos']['video_list'] ?? null)) !== null) {
-                return $v;
-            }
-        }
-        return null;
-    }
-
-    public static function pinSlots(string $json): array
-    {
-        $data = json_decode(trim($json), true);
-        foreach (is_array($data) ? $data : [] as $row) {
-            $slots = is_array($row) && ($meta = self::pinMeta($row)) !== null ? ($meta['carousel_data']['carousel_slots'] ?? null) : null;
-            if (!is_array($slots)) {
-                continue;
-            }
-            $out  = [];
-            $anim = false;
-            foreach ($slots as $slot) {
-                if (!is_array($slot)) {
-                    continue;
-                }
-                $c = [];
-                if (($v = self::mp4($slot['videos']['video_list'] ?? null)) !== null) {
-                    if ($v['ms'] > self::GIF_MAX_MS) {
-                        return [];
-                    }
-                    $c[]  = $v['url'];
-                    $anim = true;
-                }
-                $img = (string) ($slot['url'] ?? $slot['images']['orig']['url'] ?? '');
-                if (preg_match('#^https?://#', $img)) {
-                    $c[] = $img;
-                }
-                if ($c !== []) {
-                    $out[] = $c;
-                }
-            }
-            return $anim ? array_slice($out, 0, self::MAX) : [];
-        }
-        return [];
     }
 
     public static function queued(string $json): ?string
@@ -258,7 +218,6 @@ final class GalleryDl
             return [];
         }
         $urls = [];
-        $alts = [];
         foreach ($data as $row) {
             if (!is_array($row) || ($row[0] ?? null) !== 3) {
                 continue;
@@ -271,11 +230,8 @@ final class GalleryDl
             }
             if (in_array($ext, self::IMAGE, true) && preg_match('#^https?://#', $url)) {
                 $urls[] = $url;
-                if ($ext !== 'gif' && ($gif = self::findGif($meta)) !== null) {
-                    $alts[$url] = $gif;
-                }
             }
         }
-        return array_map(static fn(string $u): array => isset($alts[$u]) ? [$alts[$u], $u] : [$u], array_slice(Scrape::unique($urls), 0, self::MAX));
+        return array_map(static fn(string $u): array => [$u], array_slice(Scrape::unique($urls), 0, self::MAX));
     }
 }
