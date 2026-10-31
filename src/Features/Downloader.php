@@ -659,6 +659,19 @@ final class Downloader
         return max(0, $s);
     }
 
+    private static function codecDistance(string $vcodec): int
+    {
+        $order = ['/^av0?1/i', '/^vp0?9\.2/i', '/^vp0?9/i', '/^(hev|hvc|h265|hevc)/i', '/^(avc|h264)/i', '/^vp0?8/i', '/^(mp4v|h263)/i', '/^theora/i'];
+        $idx   = count($order);
+        foreach ($order as $i => $re) {
+            if (preg_match($re, $vcodec)) {
+                $idx = $i;
+                break;
+            }
+        }
+        return abs($idx - 4);
+    }
+
     /** estimated download size (bytes) for quality bucket $std, mimicking the yt-dlp selector */
     private static function estimate(array $info, int $std): int
     {
@@ -690,7 +703,7 @@ final class Downloader
             $audios = $plainA;
         }
         // best = highest resolution, then h264, then mp4, then video-only; ties keep yt-dlp's order
-        usort($videos, static function (array $a, array $b) use ($info): int {
+        usort($videos, static function (array $a, array $b) use ($info, $dur): int {
             $ra = self::shortSide($a, $info);
             $rb = self::shortSide($b, $info);
             if ($ra !== $rb) {
@@ -705,6 +718,21 @@ final class Downloader
             $eb = (($b['ext'] ?? '') === 'mp4') ? 1 : 0;
             if ($ea !== $eb) {
                 return $eb <=> $ea;
+            }
+            $da = self::codecDistance((string) ($a['vcodec'] ?? ''));
+            $db = self::codecDistance((string) ($b['vcodec'] ?? ''));
+            if ($da !== $db) {
+                return $da <=> $db;
+            }
+            $fa = (float) ($a['fps'] ?? 0);
+            $fb = (float) ($b['fps'] ?? 0);
+            if ($fa !== $fb) {
+                return $fb <=> $fa;
+            }
+            $sa = self::fmtSize($a, $dur);
+            $sb = self::fmtSize($b, $dur);
+            if ($sa !== $sb) {
+                return $sb <=> $sa;
             }
             // video-only first (then best audio is added), otherwise keep yt-dlp's own order
             $va = (($a['acodec'] ?? 'none') === 'none' || ($a['acodec'] ?? null) === null) ? 1 : 0;
@@ -1419,7 +1447,7 @@ final class Downloader
         }
         $slim = array_intersect_key($info, array_flip(['title', 'uploader', 'channel', 'uploader_id', 'duration', 'thumbnail', 'webpage_url',
             'is_live', 'live_status', 'width', 'height', 'vcodec', 'count', 'kinds']));
-        $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'width', 'vcodec', 'acodec', 'filesize', 'filesize_approx', 'tbr', 'vbr', 'abr', 'ext', 'protocol', 'format_note', 'dynamic_range'])),
+        $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'width', 'vcodec', 'acodec', 'filesize', 'filesize_approx', 'tbr', 'vbr', 'abr', 'fps', 'ext', 'protocol', 'format_note', 'dynamic_range'])),
             array_values((array) ($info['formats'] ?? [])));
         if ((int) ($slim['width'] ?? 0) <= 0 || (int) ($slim['height'] ?? 0) <= 0) {
             $area = 0;
