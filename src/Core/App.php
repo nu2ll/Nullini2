@@ -80,16 +80,9 @@ final class App
         return 'NulliniBot';
     }
 
-    public static function publicUrl(): string
+    public static function ngrokUrl(): string
     {
-        $u = trim((string) env('PUBLIC_URL', ''));
-        if ($u === '' && ($d = trim((string) env('RAILWAY_PUBLIC_DOMAIN', ''))) !== '') {
-            $u = 'https://' . $d;
-        }
-        if ($u === '' && ($d = (string) (Store::get('meta', 'public_domain') ?? '')) !== '') {
-            $u = 'https://' . $d;
-        }
-        return rtrim($u, '/');
+        return rtrim((string) (Store::get('meta', 'ngrok_url') ?? ''), '/');
     }
 
     public static function isAdmin(int $userId): bool

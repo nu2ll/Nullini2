@@ -15,6 +15,11 @@ RUN apt-get update \
  && yt-dlp --version && gallery-dl --version | head -1 && deno --version | head -1 && ffmpeg -version | head -1 \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
+RUN ARCH="$(uname -m)" && case "$ARCH" in aarch64|arm64) N=arm64 ;; *) N=amd64 ;; esac \
+ && curl -fsSL -o /tmp/ngrok.tgz "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${N}.tgz" \
+ && tar -xzf /tmp/ngrok.tgz -C /usr/local/bin ngrok && chmod +x /usr/local/bin/ngrok \
+ && rm -f /tmp/ngrok.tgz && ngrok version
+
 RUN { \
       echo 'memory_limit=256M'; \
       echo 'post_max_size=32M'; \

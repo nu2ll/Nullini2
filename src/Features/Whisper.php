@@ -47,7 +47,7 @@ final class Whisper
 
     public static function avatarUrl(int $id): ?string
     {
-        $u = App::publicUrl();
+        $u = App::ngrokUrl();
         if ($id <= 0 || $u === '') {
             return null;
         }

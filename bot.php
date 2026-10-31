@@ -435,6 +435,48 @@ if (Downloader::bin() !== null && env('DL_UPDATE', '1') !== '0' && !disabled('ex
     logWarn('dl', 'yt-dlp not found, downloader disabled');
 }
 
+// ---- ngrok helpers ----
+function ngrokCurrent(): string
+{
+    $ctx = stream_context_create(['http' => ['timeout' => 2]]);
+    $j   = json_decode((string) @file_get_contents('http://127.0.0.1:4040/api/tunnels', false, $ctx), true);
+    foreach ((array) ($j['tunnels'] ?? []) as $t) {
+        if (str_starts_with((string) ($t['public_url'] ?? ''), 'https://')) {
+            return rtrim((string) $t['public_url'], '/');
+        }
+    }
+    return '';
+}
+
+function ngrokUp(int $port): string
+{
+    $token = trim((string) env('NGROK_AUTHTOKEN', ''));
+    if ($token === '') {
+        return '';
+    }
+    try {
+        $dom = trim((string) env('NGROK_DOMAIN', ''));
+        exec('pkill -x ngrok > /dev/null 2>&1');
+        exec('NGROK_AUTHTOKEN=' . escapeshellarg($token) . ' nohup ngrok http ' . $port
+            . ' --log=stdout' . ($dom !== '' ? ' --url=' . escapeshellarg($dom) : '')
+            . ' > /tmp/ngrok.log 2>&1 &');
+        $url = '';
+        for ($i = 0; $i < 20 && $url === ''; $i++) {
+            sleep(1);
+            $url = ngrokCurrent();
+        }
+        Store::set('meta', 'ngrok_url', $url);
+        if ($url === '') {
+            logError('web', 'ngrok: no tunnel. ' . mb_substr((string) @file_get_contents('/tmp/ngrok.log'), -300));
+        }
+        return $url;
+    } catch (\Throwable $e) {
+        logError('web', 'ngrok: ' . $e->getMessage());
+        return '';
+    }
+}
+
+$ngrokPort = 0;
 $webPid = 0;
 if (env('WEB_SERVER', '1') !== '0' && !disabled('exec') && is_file(NULLINI_ROOT . '/public/router.php')) {
     $port = (int) (getenv('PORT') ?: 8080);
@@ -442,13 +484,14 @@ if (env('WEB_SERVER', '1') !== '0' && !disabled('exec') && is_file(NULLINI_ROOT 
     exec('PHP_CLI_SERVER_WORKERS=12 ' . escapeshellarg(PHP_BINARY) . ' -S 0.0.0.0:' . $port . ' -t ' . escapeshellarg(NULLINI_ROOT . '/public')
         . ' ' . escapeshellarg(NULLINI_ROOT . '/public/router.php') . ' > /dev/null 2>&1 & echo $!', $o);
     $webPid = (int) ($o[0] ?? 0);
-    try {
-        Railway::ensureDomain($port);
-    } catch (\Throwable $e) {
-        logError('web', 'railway domain: ' . $e->getMessage());
+    if (trim((string) env('NGROK_AUTHTOKEN', '')) !== '') {
+        $ngrokPort = $port;
+        ngrokUp($port);
+    } else {
+        Store::set('meta', 'ngrok_url', '');
     }
-    $pub = App::publicUrl();
-    out("port {$port}" . ($pub !== '' ? " · {$pub}" : ' · no public domain yet'), 'web');
+    $pub = App::ngrokUrl();
+    out("port {$port}" . ($pub !== '' ? " · {$pub}" : ' · ngrok off'), 'web');
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' --warm > /dev/null 2>&1 &');
 }
 App::tg()->call('setChatMenuButton', ['menu_button' => ['type' => 'commands']], 10);
@@ -492,6 +535,8 @@ $conflict    = 0;
 $lastGw      = 0;
 $gwPid       = -1;
 $lastPoller  = 0;
+$lastNg      = time();
+$ngPid       = -1;
 
 while ($running) {
     if (microtime(true) - $lastTick >= 1.0) {
@@ -526,6 +571,18 @@ while ($running) {
             logError('gw', $e->getMessage());
             Db::disconnect();
         }
+    }
+    if ($ngrokPort > 0 && time() - $lastNg >= 30 && !isset($children[$ngPid])) {
+        $lastNg = time();
+        $ngPid  = background(static function () use ($ngrokPort) {
+            $cur = ngrokCurrent();
+            if ($cur === '') {
+                $u = ngrokUp($ngrokPort);
+                logWarn('web', 'ngrok restarted · ' . ($u !== '' ? $u : 'failed'));
+            } elseif ($cur !== App::ngrokUrl()) {
+                Store::set('meta', 'ngrok_url', $cur);
+            }
+        }, $mode, $children, 60);
     }
     if ($polled && $extra && time() - $lastPoller >= 10) {
         $lastPoller = time();

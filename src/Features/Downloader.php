@@ -73,12 +73,21 @@ final class Downloader
         }
         krsort($have);
         $opts = [];
+        $prev = 0;
         foreach (array_keys($have) as $h) {
-            if (self::estimate($info, $h) > $max) {
+            $b = self::estimate($info, $h);
+            if ($b > $max) {
                 continue;
             }
+            // a lower quality can never be bigger than a higher one: clamp so the list never looks wrong
+            if ($b > 0 && $prev > 0 && $b > $prev) {
+                $b = $prev;
+            }
+            if ($b > 0) {
+                $prev = $b;
+            }
             $name   = [2160 => '4K', 1440 => '2K'][$h] ?? fa($h) . 'p';
-            $opts[] = ['v' . $h, ($h >= 720 ? '🎬 ' : '📱 ') . $name . self::sizeHint($info, $h)];
+            $opts[] = ['v' . $h, '🎬 ' . $name . self::sizeHint($info, $h, $b)];
         }
         if (!$opts) {
             $opts[] = ['hd', '🎬 دانلود ویدیو'];
@@ -571,9 +580,9 @@ final class Downloader
         ]);
     }
 
-    private static function sizeHint(array $info, int $h): string
+    private static function sizeHint(array $info, int $h, ?int $bytes = null): string
     {
-        $b = self::estimate($info, $h);
+        $b = $bytes ?? self::estimate($info, $h);
         return $b >= 1048576 ? ' (~' . self::mb((float) $b) . ')' : '';
     }
 
@@ -668,7 +677,19 @@ final class Downloader
         if (!$videos) {
             return 0;
         }
-        // best = highest resolution, then h264 (same order as -S res,vcodec:h264)
+        // the downloader never picks YouTube "Premium" or HLS (m3u8) variants when a normal one exists;
+        // counting them is what inflated the estimate (e.g. 1052 MB shown vs ~386 MB real)
+        $isOdd = static fn(array $f): bool => stripos((string) ($f['format_note'] ?? ''), 'premium') !== false
+            || str_starts_with((string) ($f['protocol'] ?? ''), 'm3u8');
+        $plain = array_values(array_filter($videos, static fn($f) => !$isOdd($f)));
+        if ($plain) {
+            $videos = $plain;
+        }
+        $plainA = array_values(array_filter($audios, static fn($f) => !$isOdd($f)));
+        if ($plainA) {
+            $audios = $plainA;
+        }
+        // best = highest resolution, then h264, then mp4, then video-only; ties keep yt-dlp's order
         usort($videos, static function (array $a, array $b) use ($info): int {
             $ra = self::shortSide($a, $info);
             $rb = self::shortSide($b, $info);
@@ -677,7 +698,18 @@ final class Downloader
             }
             $ha = str_starts_with((string) ($a['vcodec'] ?? ''), 'avc') ? 1 : 0;
             $hb = str_starts_with((string) ($b['vcodec'] ?? ''), 'avc') ? 1 : 0;
-            return $hb <=> $ha;
+            if ($ha !== $hb) {
+                return $hb <=> $ha;
+            }
+            $ea = (($a['ext'] ?? '') === 'mp4') ? 1 : 0;
+            $eb = (($b['ext'] ?? '') === 'mp4') ? 1 : 0;
+            if ($ea !== $eb) {
+                return $eb <=> $ea;
+            }
+            // video-only first (then best audio is added), otherwise keep yt-dlp's own order
+            $va = (($a['acodec'] ?? 'none') === 'none' || ($a['acodec'] ?? null) === null) ? 1 : 0;
+            $vb = (($b['acodec'] ?? 'none') === 'none' || ($b['acodec'] ?? null) === null) ? 1 : 0;
+            return $vb <=> $va;
         });
         $v     = null;
         $vsize = 0;
@@ -1387,7 +1419,7 @@ final class Downloader
         }
         $slim = array_intersect_key($info, array_flip(['title', 'uploader', 'channel', 'uploader_id', 'duration', 'thumbnail', 'webpage_url',
             'is_live', 'live_status', 'width', 'height', 'vcodec', 'count', 'kinds']));
-        $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'width', 'vcodec', 'acodec', 'filesize', 'filesize_approx', 'tbr', 'vbr', 'abr'])),
+        $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'width', 'vcodec', 'acodec', 'filesize', 'filesize_approx', 'tbr', 'vbr', 'abr', 'ext', 'protocol', 'format_note', 'dynamic_range'])),
             array_values((array) ($info['formats'] ?? [])));
         if ((int) ($slim['width'] ?? 0) <= 0 || (int) ($slim['height'] ?? 0) <= 0) {
             $area = 0;
@@ -1503,7 +1535,7 @@ final class Downloader
             $rows[0][] = btn('🎵 فقط صدا', "dl:{$token}:mp3", null);
         }
         if ($fmt !== 'mp3' && $fmt !== 'v360' && $fmt !== 'sd') {
-            $rows[0][] = btn('📱 کم‌حجم', "dl:{$token}:v360", null);
+            $rows[0][] = btn('🎬 کم‌حجم', "dl:{$token}:v360", null);
         }
         $rows[] = [btn('✖️ بیخیال', "dl:{$token}:x", null)];
         return ikb($rows);
@@ -1538,6 +1570,9 @@ final class Downloader
     public static function mb(float $bytes): string
     {
         $mb = $bytes / 1048576;
+        if ($mb >= 1024) {
+            return fa(rtrim(rtrim(number_format($mb / 1024, 1, '.', ''), '0'), '.')) . ' گیگ';
+        }
         return fa($mb >= 10 ? (string) round($mb) : number_format($mb, 1)) . ' مگ';
     }
 
