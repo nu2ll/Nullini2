@@ -63,14 +63,12 @@ final class Downloader
         }
         $have = [];
         foreach ((array) ($info['formats'] ?? []) as $f) {
-            $fh = (int) ($f['height'] ?? 0);
-            if ($fh > 0 && ($f['vcodec'] ?? '') !== 'none') {
-                foreach ([144, 240, 360, 480, 720, 1080, 1440, 2160] as $std) {
-                    if ($fh <= $std + 40 && $fh >= $std * 0.85) {
-                        $have[$std] = true;
-                        break;
-                    }
-                }
+            if (self::kind((array) $f) !== 'v') {
+                continue;
+            }
+            $std = self::stdOf((array) $f, $info);
+            if ($std > 0) {
+                $have[$std] = true;
             }
         }
         krsort($have);
@@ -85,7 +83,7 @@ final class Downloader
         if (!$opts) {
             $opts[] = ['hd', '🎬 دانلود ویدیو'];
         }
-        $opts[] = ['mp3', '🎵 فقط صدا (MP3)'];
+        $opts[] = ['mp3', '🎵 فقط صدا (MP3)' . self::mp3Hint($info)];
         return $opts;
     }
 
@@ -575,31 +573,149 @@ final class Downloader
 
     private static function sizeHint(array $info, int $h): string
     {
-        $mb = self::estimate($info, $h) / 1048576;
-        return $mb >= 1 ? ' (~' . fa((string) round($mb)) . 'MB)' : '';
+        $b = self::estimate($info, $h);
+        return $b >= 1048576 ? ' (~' . self::mb((float) $b) . ')' : '';
     }
 
-    private static function estimate(array $info, int $h): int
+    private static function mp3Hint(array $info): string
     {
-        $best  = 0;
-        $bestH = 0;
-        $audio = 0;
-        foreach ((array) ($info['formats'] ?? []) as $f) {
-            $size = (int) ($f['filesize'] ?? $f['filesize_approx'] ?? 0);
-            if ($size <= 0) {
-                continue;
-            }
-            $fh = (int) ($f['height'] ?? 0);
-            if (($f['vcodec'] ?? 'none') === 'none') {
-                $audio = max($audio, $size);
-            } elseif ($fh <= $h && $fh >= $bestH) {
-                if ($fh > $bestH || $size < $best || $best === 0) {
-                    $best = $size;
-                }
-                $bestH = $fh;
+        $dur = (int) ($info['duration'] ?? 0);
+        $b   = $dur * 16500; // MP3 VBR q5 ≈ 130kbps
+        return $b >= 1048576 ? ' (~' . self::mb((float) $b) . ')' : '';
+    }
+
+    /** true when the media is portrait (reels, shorts, tiktok...) */
+    private static function isVertical(array $a): bool
+    {
+        $w = (int) ($a['width'] ?? 0);
+        $h = (int) ($a['height'] ?? 0);
+        return $w > 0 && $h > $w;
+    }
+
+    /** 'v' = has video, 'a' = audio only, '' = ignore (storyboards etc.) */
+    private static function kind(array $f): string
+    {
+        $vc = $f['vcodec'] ?? null;
+        $ac = $f['acodec'] ?? null;
+        if ($vc === 'none' || ($vc === null && (int) ($f['height'] ?? 0) <= 0)) {
+            return ($ac !== null && $ac !== 'none') ? 'a' : '';
+        }
+        return 'v';
+    }
+
+    /** the real "p" of a format = its SHORT side (1080x1920 portrait is 1080p, not 4K) */
+    private static function shortSide(array $f, array $info): int
+    {
+        $h = (int) ($f['height'] ?? 0);
+        $w = (int) ($f['width'] ?? 0);
+        if ($h <= 0) {
+            return 0;
+        }
+        if ($w > 0) {
+            return min($h, $w);
+        }
+        $iw = (int) ($info['width'] ?? 0);
+        $ih = (int) ($info['height'] ?? 0);
+        return ($iw > 0 && $ih > $iw) ? (int) round($h * $iw / $ih) : $h;
+    }
+
+    private static function stdOf(array $f, array $info): int
+    {
+        $s = self::shortSide($f, $info);
+        if ($s <= 0) {
+            return 0;
+        }
+        foreach ([144, 240, 360, 480, 720, 1080, 1440, 2160] as $std) {
+            if ($s <= $std + 40 && $s >= $std * 0.85) {
+                return $std;
             }
         }
-        return $best > 0 ? $best + $audio : 0;
+        return 0;
+    }
+
+    /** size of one format in bytes: exact -> approx -> bitrate x duration */
+    private static function fmtSize(array $f, int $dur): int
+    {
+        $s = (int) ($f['filesize'] ?? 0);
+        if ($s <= 0) {
+            $s = (int) ($f['filesize_approx'] ?? 0);
+        }
+        if ($s <= 0 && $dur > 0) {
+            $br = (float) ($f['tbr'] ?? 0);
+            if ($br <= 0) {
+                $br = (float) ($f['vbr'] ?? 0) + (float) ($f['abr'] ?? 0);
+            }
+            $s = (int) round($br * 125 * $dur);
+        }
+        return max(0, $s);
+    }
+
+    /** estimated download size (bytes) for quality bucket $std, mimicking the yt-dlp selector */
+    private static function estimate(array $info, int $std): int
+    {
+        $dur    = (int) ($info['duration'] ?? 0);
+        $videos = [];
+        $audios = [];
+        foreach ((array) ($info['formats'] ?? []) as $f) {
+            $f = (array) $f;
+            $k = self::kind($f);
+            if ($k === 'v' && self::stdOf($f, $info) === $std) {
+                $videos[] = $f;
+            } elseif ($k === 'a') {
+                $audios[] = $f;
+            }
+        }
+        if (!$videos) {
+            return 0;
+        }
+        // best = highest resolution, then h264 (same order as -S res,vcodec:h264)
+        usort($videos, static function (array $a, array $b) use ($info): int {
+            $ra = self::shortSide($a, $info);
+            $rb = self::shortSide($b, $info);
+            if ($ra !== $rb) {
+                return $rb <=> $ra;
+            }
+            $ha = str_starts_with((string) ($a['vcodec'] ?? ''), 'avc') ? 1 : 0;
+            $hb = str_starts_with((string) ($b['vcodec'] ?? ''), 'avc') ? 1 : 0;
+            return $hb <=> $ha;
+        });
+        $v     = null;
+        $vsize = 0;
+        foreach ($videos as $cand) {
+            $sz = self::fmtSize($cand, $dur);
+            if ($v === null) {
+                $v = $cand;
+            }
+            if ($sz > 0) {
+                $v     = $cand;
+                $vsize = $sz;
+                break;
+            }
+        }
+        if ($vsize <= 0) {
+            return 0;
+        }
+        $muxed = ($v['acodec'] ?? 'none') !== 'none' && ($v['acodec'] ?? null) !== null;
+        if ($muxed || !$audios) {
+            return $vsize;
+        }
+        // best audio = AAC/m4a first, then highest bitrate (same order as -S ext:m4a)
+        usort($audios, static function (array $a, array $b): int {
+            $ma = str_starts_with((string) ($a['acodec'] ?? ''), 'mp4a') ? 1 : 0;
+            $mb = str_starts_with((string) ($b['acodec'] ?? ''), 'mp4a') ? 1 : 0;
+            if ($ma !== $mb) {
+                return $mb <=> $ma;
+            }
+            return (float) ($b['abr'] ?? 0) <=> (float) ($a['abr'] ?? 0);
+        });
+        $asize = 0;
+        foreach ($audios as $a) {
+            $asize = self::fmtSize($a, $dur);
+            if ($asize > 0) {
+                break;
+            }
+        }
+        return $vsize + $asize;
     }
 
     public static function onCallback(array $cq, string $data): void
@@ -679,7 +795,7 @@ final class Downloader
             $limit = self::limit($job);
             $last  = 0.0;
             $stage = '';
-            $res   = self::run(array_merge([self::bin()], self::commonArgs(), self::formatArgs($fmt, $limit <= self::BOT_API_BYTES), [
+            $res   = self::run(array_merge([self::bin()], self::commonArgs(), self::formatArgs($fmt, $limit <= self::BOT_API_BYTES, self::isVertical($job)), [
                 '--no-playlist', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
                 '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
                 '--max-filesize', (int) ($limit / 1048576) . 'M',
@@ -792,7 +908,7 @@ final class Downloader
     {
         $last = 0.0;
         return self::run(array_merge([self::bin()], self::commonArgs(), [
-            '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<45M]+ba[filesize<5M]/b[filesize<50M]/bv*+ba/b', '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
+            '-f', $limit > self::BOT_API_BYTES ? 'bv*+ba/b' : 'bv*[filesize<45M]+ba[filesize<5M]/b[filesize<50M]/bv*+ba/b', '-S', 'res,vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4',
             '--no-playlist', '--playlist-items', '1:' . self::ALBUM_MAX, '--ignore-errors', '--newline', '--no-warnings', '--no-mtime', '--restrict-filenames',
             '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3', '--concurrent-fragments', '4',
             '--max-filesize', (int) ($limit / 1048576) . 'M',
@@ -976,20 +1092,20 @@ final class Downloader
         $tg->call('deleteMessage', ['chat_id' => $chat, 'message_id' => (int) $job['card']], 8);
     }
 
-    private static function formatArgs(string $fmt, bool $small = false): array
+    private static function formatArgs(string $fmt, bool $small = false, bool $vertical = false): array
     {
         if ($fmt === 'mp3') {
             return ['-f', 'ba[filesize<45M]/ba[filesize_approx<45M]/ba/b', '-x', '--audio-format', 'mp3', '--audio-quality', '5',
                 '--embed-metadata', '--embed-thumbnail', '--convert-thumbnails', 'jpg'];
         }
         $h = ['sd' => 360, 'hd' => 720, 'fhd' => 1080][$fmt] ?? (preg_match('/^v(\d{3,4})$/', $fmt, $vm) ? (int) $vm[1] : 720);
-        $v = "[height<={$h}]";
+        $v = '[' . ($vertical ? 'width' : 'height') . '<=?' . ($h + 40) . ']';
         if (self::mtproto() && !$small) {
             $sel = "bv*{$v}+ba/b{$v}/bv*+ba/b";
         } else {
             $sel = "bv*{$v}[filesize<45M]+ba[filesize<5M]/bv*{$v}[filesize_approx<45M]+ba/b{$v}[filesize<50M]/b{$v}[filesize_approx<50M]/bv*{$v}+ba/b{$v}/bv*+ba/b";
         }
-        return ['-f', $sel, '-S', 'vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4', '--remux-video', 'mp4'];
+        return ['-f', $sel, '-S', 'res,vcodec:h264,ext:mp4:m4a', '--merge-output-format', 'mp4', '--remux-video', 'mp4'];
     }
 
     public static function cookiesFile(): ?string
@@ -1245,11 +1361,6 @@ final class Downloader
 
     public static function probe(string $url, bool $multi = false): array
     {
-        $key = 'dl_probe:' . md5($url) . ($multi ? ':m' : '');
-        $hit = Store::get('cache', $key);
-        if (is_array($hit) && time() - (int) ($hit['at'] ?? 0) < 1800) {
-            return ['info' => $hit['v']];
-        }
         $res = self::run(array_merge([self::bin()], self::commonArgs(), [
             '-J', '--no-playlist', '--no-warnings', '--skip-download', '--socket-timeout', '15', '--playlist-items', $multi ? '1:' . self::ALBUM_MAX : '1', $url,
         ]), 60);
@@ -1276,9 +1387,20 @@ final class Downloader
         }
         $slim = array_intersect_key($info, array_flip(['title', 'uploader', 'channel', 'uploader_id', 'duration', 'thumbnail', 'webpage_url',
             'is_live', 'live_status', 'width', 'height', 'vcodec', 'count', 'kinds']));
-        $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'vcodec', 'filesize', 'filesize_approx'])),
+        $slim['formats'] = array_map(static fn($f) => array_intersect_key((array) $f, array_flip(['height', 'width', 'vcodec', 'acodec', 'filesize', 'filesize_approx', 'tbr', 'vbr', 'abr'])),
             array_values((array) ($info['formats'] ?? [])));
-        Store::set('cache', $key, ['at' => time(), 'v' => $slim]);
+        if ((int) ($slim['width'] ?? 0) <= 0 || (int) ($slim['height'] ?? 0) <= 0) {
+            $area = 0;
+            foreach ($slim['formats'] as $f) {
+                $fw = (int) ($f['width'] ?? 0);
+                $fh = (int) ($f['height'] ?? 0);
+                if ($fw > 0 && $fh > 0 && $fw * $fh > $area) {
+                    $area           = $fw * $fh;
+                    $slim['width']  = $fw;
+                    $slim['height'] = $fh;
+                }
+            }
+        }
         return ['info' => $slim];
     }
 
